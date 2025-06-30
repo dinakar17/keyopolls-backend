@@ -51,10 +51,12 @@ INSTALLED_APPS = [
     "corsheaders",
     "ninja",
     # Local apps
-    # "comments",
-    # "notifications",
-    # "polls",
-    # "communities",
+    "keyopolls.profile",
+    "keyopolls.comments",
+    "keyopolls.common",
+    "keyopolls.notifications",
+    "keyopolls.polls",
+    "keyopolls.communities",
 ]
 
 MIDDLEWARE = [
@@ -95,7 +97,8 @@ WSGI_APPLICATION = "core.wsgi.application"
 
 DATABASES = {
     "default": dj_database_url.parse(
-        config("DATABASE_URL", default="sqlite:///db.sqlite3"),
+        "postgres://postgres:12345@localhost:5432/keyopolls"
+        # config("DATABASE_URL", default="sqlite:///db.sqlite3"),
     )
 }
 
@@ -208,12 +211,7 @@ AWS_S3_CUSTOM_DOMAIN = f"{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com"
 AWS_S3_FILE_OVERWRITE = False
 
 # Authentication keys
-MEMBER_LOGIN_KEY = config("MEMBER_LOGIN_KEY")
-MERCHANT_LOGIN_KEY = config("MERCHANT_LOGIN_KEY")
-MERCHANT_OWNER_LOGIN_KEY = config("MERCHANT_OWNER_LOGIN_KEY")
-
-PUBLIC_SECRET_KEY = config("PUBLIC_SECRET_KEY")
-ANONYMOUS_SECRET_KEY = config("ANONYMOUS_SECRET_KEY")
+PSEUDONYMOUS_SECRET_KEY = config("PSEUDONYMOUS_SECRET_KEY")
 
 # Cashfree settings
 CASHFREE_CLIENT_ID = config("CASHFREE_CLIENT_ID")

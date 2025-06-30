@@ -10,8 +10,12 @@ from django.db import transaction
 from django.db.models import F
 from django.http import HttpRequest
 from django.utils import timezone
-from keyoconnect.comments.models import GenericComment
-from keyoconnect.comments.schemas import (
+from ninja import Field, File, Router, Schema, UploadedFile
+from ninja.errors import ValidationError
+from shared.schemas import Message
+
+from keyopolls.comments.models import GenericComment
+from keyopolls.comments.schemas import (
     CommentCreateSchema,
     CommentDeleteSchema,
     CommentOut,
@@ -19,32 +23,30 @@ from keyoconnect.comments.schemas import (
     CommentUpdateSchema,
     PaginatedCommentResponse,
 )
-from keyoconnect.common.schemas import ContentTypeEnum
-from keyoconnect.common.utils import (
+from keyopolls.common.schemas import ContentTypeEnum
+
+# Commented out notification imports - will update later
+# from keyopolls.connect_notifications.notification_utils import (
+#     auto_follow_comment,
+#     auto_follow_post,
+#     notify_comment_reply,
+#     notify_followed_comment_reply,
+#     notify_followed_post_comment,
+#     notify_post_comment,
+#     notify_replies_milestone,
+# )
+from keyopolls.profile.middleware import OptionalPseudonymousJWTAuth
+from keyopolls.utils import (
     create_link_object,
     create_media_object,
     delete_existing_media_and_links,
     get_content_object,
     validate_media_file,
 )
-from keyoconnect.connect_notifications.notification_utils import (
-    auto_follow_comment,
-    auto_follow_post,
-    notify_comment_reply,
-    notify_followed_comment_reply,
-    notify_followed_post_comment,
-    notify_post_comment,
-    notify_replies_milestone,
-)
-from keyoconnect.profiles.middleware import OptionalPublicJWTAuth
-from keyoconnect.profiles.models import PublicProfile
-from ninja import Field, File, Router, Schema, UploadedFile
-from ninja.errors import ValidationError
-from shared.schemas import Message
 
 logger = logging.getLogger(__name__)
 
-router = Router(tags=["Connect Comments"])
+router = Router(tags=["Comments"])
 
 
 """
@@ -57,7 +59,7 @@ CUD operations for Comments
 @router.post(
     "/{content_type}/{object_id}/comments",
     response={201: CommentResponse, 400: Message, 404: Message},
-    auth=OptionalPublicJWTAuth,
+    auth=OptionalPseudonymousJWTAuth,
 )
 def create_comment(
     request: HttpRequest,
@@ -66,37 +68,11 @@ def create_comment(
     data: CommentCreateSchema,
     media_files: List[UploadedFile] = File(None),
 ):
-    """Create a new comment on a content object using public profile"""
-    public_profile = request.auth
+    """Create a new comment on a content object using pseudonymous profile"""
+    profile = request.auth
 
-    if not public_profile:
+    if not profile:
         return 400, {"message": "Authentication required"}
-
-    # Validate that the profile type in data is supported
-    if not hasattr(data, "profile_type") or data.profile_type not in [
-        "public",
-        "anonymous",
-    ]:
-        return 400, {
-            "message": (
-                "Invalid or missing profile_type. Must be 'public' or 'anonymous'"
-            )
-        }
-
-    profile_type = data.profile_type
-
-    # Get the appropriate profile for commenting
-    if profile_type == "public":
-        commenting_profile = public_profile
-    elif profile_type == "anonymous":
-        # Check if user has an anonymous profile
-        try:
-            anonymous_profile = public_profile.anonymous_profile
-            if not anonymous_profile:
-                return 400, {"message": "Anonymous profile not found"}
-            commenting_profile = anonymous_profile
-        except AttributeError:
-            return 400, {"message": "Anonymous profile not available"}
 
     try:
         # Get the content object
@@ -127,11 +103,10 @@ def create_comment(
 
         # Use database transaction to ensure data consistency
         with transaction.atomic():
-            # Create the comment with appropriate profile reference
+            # Create the comment with pseudonymous profile reference
             comment_data = {
                 "content": data.content,
-                "profile_type": profile_type,
-                "profile_id": commenting_profile.id,
+                "profile": profile,
                 "parent": parent,
                 "content_type": ContentType.objects.get_for_model(content_obj),
                 "object_id": content_obj.id,
@@ -150,8 +125,8 @@ def create_comment(
             if hasattr(data, "link") and data.link:
                 create_link_object(comment, data.link)
 
-            # Create auth data with public profile context for consistency
-            auth_data = {"profiles": {"public": public_profile}}
+            # Create auth data with profile context
+            auth_data = {"profile": profile}
 
             comment.refresh_from_db()
 
@@ -166,66 +141,70 @@ def create_comment(
             content_obj.comment_count = F("comment_count") + 1
             content_obj.save(update_fields=["comment_count"])
 
-            # === NOTIFICATION TRIGGERS ===
-            # Use public profile for all notifications for consistency
-            notification_profile = public_profile
+            # === NOTIFICATION TRIGGERS - COMMENTED OUT FOR NOW ===
+            # Will be updated later when notification system is implemented
 
-            # Determine what we're commenting on
+            # # Determine what we're commenting on
+            # if parent:
+            #     # This is a reply to a comment
+
+            #     # 1. Reply notification: Notify comment owner about the reply
+            #     notify_comment_reply(
+            #         parent, comment, profile, send_push=True
+            #     )
+
+            #     # 2. Followed comment notification: Notify users following this
+            # comment
+            #     notify_followed_comment_reply(
+            #         parent, comment, profile, send_push=False
+            #     )
+
+            #     # 3. Auto-follow the parent comment for future notifications
+            #     auto_follow_comment(profile, parent)
+
+            #     # 4. Increment reply count on parent comment
+            #     parent.increment_reply_count()
+
+            #     # 5. Check if parent comment reached replies milestone
+            #     parent.refresh_from_db()  # Get updated reply_count
+            #     notify_replies_milestone(parent, parent.reply_count, send_push=True)
+
+            #     # 6. Also auto-follow the main post for post-level notifications
+            #     if hasattr(content_obj, "id"):  # Ensure it's a Post object
+            #         auto_follow_post(
+            #             profile, content_obj, interaction_type="reply"
+            #         )
+
+            # else:
+            #     # This is a direct comment on the main content (post)
+
+            #     # 1. Comment notification: Notify post owner about the comment
+            #     notify_post_comment(
+            #         content_obj, comment, profile, send_push=True
+            #     )
+
+            #     # 2. Followed post notification: Notify users following this post
+            #     notify_followed_post_comment(
+            #         content_obj, comment, profile, send_push=False
+            #     )
+
+            #     # 3. Auto-follow the post for future notifications
+            #     auto_follow_post(
+            #         profile, content_obj, interaction_type="comment"
+            #     )
+
+            # # === CHECK FOR POST REPLIES MILESTONE (for both direct comments
+            # #  and replies) ===
+            # # Refresh to get the updated comment_count after increment
+            # if hasattr(content_obj, "comment_count"):
+            #     content_obj.refresh_from_db()  # Get the updated comment_count
+            #     notify_replies_milestone(
+            #         content_obj, content_obj.comment_count, send_push=True
+            #     )
+
+            # Update parent reply count if this is a reply
             if parent:
-                # This is a reply to a comment
-
-                # 1. Reply notification: Notify comment owner about the reply
-                notify_comment_reply(
-                    parent, comment, notification_profile, send_push=True
-                )
-
-                # 2. Followed comment notification: Notify users following this comment
-                notify_followed_comment_reply(
-                    parent, comment, notification_profile, send_push=False
-                )
-
-                # 3. Auto-follow the parent comment for future notifications
-                auto_follow_comment(notification_profile, parent)
-
-                # 4. Increment reply count on parent comment
                 parent.increment_reply_count()
-
-                # 5. Check if parent comment reached replies milestone
-                parent.refresh_from_db()  # Get updated reply_count
-                notify_replies_milestone(parent, parent.reply_count, send_push=True)
-
-                # 6. Also auto-follow the main post for post-level notifications
-                if hasattr(content_obj, "id"):  # Ensure it's a Post object
-                    auto_follow_post(
-                        notification_profile, content_obj, interaction_type="reply"
-                    )
-
-            else:
-                # This is a direct comment on the main content (post)
-
-                # 1. Comment notification: Notify post owner about the comment
-                notify_post_comment(
-                    content_obj, comment, notification_profile, send_push=True
-                )
-
-                # 2. Followed post notification: Notify users following this post
-                notify_followed_post_comment(
-                    content_obj, comment, notification_profile, send_push=False
-                )
-
-                # 3. Auto-follow the post for future notifications
-                auto_follow_post(
-                    notification_profile, content_obj, interaction_type="comment"
-                )
-
-            # === CHECK FOR POST REPLIES MILESTONE (for both direct comments
-            #  and replies) ===
-            # Refresh to get the updated comment_count after increment
-            if hasattr(content_obj, "comment_count"):
-                content_obj.refresh_from_db()  # Get the updated comment_count
-                notify_replies_milestone(
-                    content_obj, content_obj.comment_count, send_push=True
-                )
 
             # === END NOTIFICATION TRIGGERS ===
 
@@ -252,7 +231,7 @@ def create_comment(
 @router.post(
     "/comments/{comment_id}",
     response={200: CommentResponse, 400: Message, 403: Message, 404: Message},
-    auth=OptionalPublicJWTAuth,
+    auth=OptionalPseudonymousJWTAuth,
 )
 def update_comment(
     request: HttpRequest,
@@ -260,10 +239,10 @@ def update_comment(
     data: CommentUpdateSchema,
     media_files: List[UploadedFile] = File(None),
 ):
-    """Update a comment using public profile"""
-    public_profile = request.auth
+    """Update a comment using pseudonymous profile"""
+    profile = request.auth
 
-    if not public_profile:
+    if not profile:
         return 400, {"message": "Authentication required"}
 
     try:
@@ -273,7 +252,7 @@ def update_comment(
         )
 
         # Check if the user is authorized to edit this comment
-        if not check_comment_ownership(comment, public_profile):
+        if not check_comment_ownership(comment, profile):
             return 403, {"message": "You are not authorized to edit this comment"}
 
         # Validate media files count (limit to 1 as per model constraints)
@@ -314,8 +293,8 @@ def update_comment(
             if hasattr(data, "link") and data.link:
                 create_link_object(comment, data.link)
 
-            # Create auth data with public profile context for consistency
-            auth_data = {"profiles": {"public": public_profile}}
+            # Create auth data with profile context
+            auth_data = {"profile": profile}
 
             comment.refresh_from_db()
 
@@ -344,13 +323,13 @@ def update_comment(
 @router.delete(
     "/comments/{comment_id}",
     response={200: CommentDeleteSchema, 400: Message, 403: Message, 404: Message},
-    auth=OptionalPublicJWTAuth,
+    auth=OptionalPseudonymousJWTAuth,
 )
 def delete_comment(request: HttpRequest, comment_id: int):
-    """Delete a comment using public profile"""
-    public_profile = request.auth
+    """Delete a comment using pseudonymous profile"""
+    profile = request.auth
 
-    if not public_profile:
+    if not profile:
         return 400, {"message": "Authentication required"}
 
     try:
@@ -358,7 +337,7 @@ def delete_comment(request: HttpRequest, comment_id: int):
         comment = GenericComment.objects.get(id=comment_id, is_deleted=False)
 
         # Check if the user is authorized to delete this comment
-        if not check_comment_ownership(comment, public_profile):
+        if not check_comment_ownership(comment, profile):
             return 403, {"message": "You are not authorized to delete this comment"}
 
         # Soft delete the comment
@@ -385,34 +364,21 @@ def delete_comment(request: HttpRequest, comment_id: int):
         return 400, {"message": "An error occurred while deleting the comment"}
 
 
-def check_comment_ownership(comment: GenericComment, public_profile) -> bool:
+def check_comment_ownership(comment: GenericComment, profile) -> bool:
     """
-    Check if the public profile owns the given comment.
-    Works for both public and anonymous comments.
+    Check if the profile owns the given comment.
 
     Args:
         comment: The comment to check ownership for
-        public_profile: The authenticated user's public profile
+        profile: The authenticated user's pseudonymous profile
 
     Returns:
         True if the user owns the comment, False otherwise
     """
-    if comment.profile_type == "public":
-        # For public comments, check if the comment's profile_id matches public profile
-        return comment.profile_id == public_profile.id
-
-    elif comment.profile_type == "anonymous":
-        # For anonymous comments, check if the comment's profile_id matches
-        # the user's anonymous profile id
-        try:
-            return (
-                public_profile.anonymous_profile
-                and comment.profile_id == public_profile.anonymous_profile.id
-            )
-        except AttributeError:
-            return False
-
-    return False
+    try:
+        return comment.profile.id == profile.id
+    except AttributeError:
+        return False
 
 
 class CommentSortEnum(str, Enum):
@@ -440,7 +406,7 @@ class CommentThreadResponse(Schema):
 @router.get(
     "/{content_type}/{object_id}/comments",
     response={200: PaginatedCommentResponse, 400: Message, 404: Message},
-    auth=OptionalPublicJWTAuth,
+    auth=OptionalPseudonymousJWTAuth,
 )
 def get_comments(
     request: HttpRequest,
@@ -451,11 +417,11 @@ def get_comments(
     sort: CommentSortEnum = CommentSortEnum.NEWEST,
 ):
     """Get paginated top-level comments with nested replies up to depth 6"""
-    # Extract authentication info from OptionalPublicJWTAuth
-    public_profile = request.auth if isinstance(request.auth, PublicProfile) else None
+    # Extract authentication info from OptionalPseudonymousJWTAuth
+    profile = request.auth
 
-    # Create auth data with public profile context
-    auth_data = {"profiles": {"public": public_profile}} if public_profile else {}
+    # Create auth data with profile context
+    auth_data = {"profile": profile} if profile else {}
 
     # Validate parameters
     validation_error = validate_pagination_params(page, page_size)
@@ -502,17 +468,17 @@ def get_comments(
 @router.get(
     "/comments/{comment_id}/thread",
     response={200: CommentThreadResponse, 400: Message, 404: Message},
-    auth=OptionalPublicJWTAuth,
+    auth=OptionalPseudonymousJWTAuth,
 )
 def get_comment_thread(
     request: HttpRequest, comment_id: int, parent_levels: int = 3, reply_depth: int = 6
 ):
     """Get a specific comment with parent context and nested replies"""
-    # Extract authentication info from OptionalPublicJWTAuth
-    public_profile = request.auth if isinstance(request.auth, PublicProfile) else None
+    # Extract authentication info from OptionalPseudonymousJWTAuth
+    profile = request.auth
 
-    # Create auth data with public profile context
-    auth_data = {"profiles": {"public": public_profile}} if public_profile else {}
+    # Create auth data with profile context
+    auth_data = {"profile": profile} if profile else {}
 
     # Validate parameters
     if not (0 <= parent_levels <= 5):

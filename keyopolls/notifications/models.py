@@ -7,49 +7,66 @@ from django.utils import timezone
 class NotificationType(models.TextChoices):
     """Simplified notification types based on requirements"""
 
-    # === POST OWNER NOTIFICATIONS ===
-    COMMENT = "comment", "Comment"  # Someone commented on your post
+    # === POLL OWNER NOTIFICATIONS ===
+    POLL_COMMENT = "poll_comment", "Poll Comment"  # Someone commented on your poll
+    POLL_VOTE = "poll_vote", "Poll Vote"  # Someone voted on your poll
 
     # === COMMENT OWNER NOTIFICATIONS ===
     REPLY = "reply", "Reply"  # Someone replied to your comment
 
     # === SOCIAL NOTIFICATIONS ===
     FOLLOW = "follow", "Follow"  # Someone started following you
-    MENTION = "mention", "Mention"  # Someone mentioned you in their post/comment
+    MENTION = "mention", "Mention"  # Someone mentioned you in their poll/comment
+
+    # === COMMUNITY NOTIFICATIONS ===
+    COMMUNITY_INVITE = (
+        "community_invite",
+        "Community Invite",
+    )  # Invited to join community
+    COMMUNITY_NEW_POLL = (
+        "community_new_poll",
+        "Community New Poll",
+    )  # New poll in community
+    COMMUNITY_ROLE_CHANGE = (
+        "community_role_change",
+        "Community Role Change",
+    )  # Role changed in community
 
     # === FOLLOW-BASED NOTIFICATIONS ===
-    FOLLOWED_USER_POST = (
-        "followed_user_post",
-        "Followed User Post",
-    )  # Someone you follow created a new post
-    FOLLOWED_POST_COMMENT = (
-        "followed_post_comment",
-        "Followed Post Comment",
-    )  # New comment on a post you follow
+    FOLLOWED_USER_POLL = (
+        "followed_user_poll",
+        "Followed User Poll",
+    )  # Someone you follow created a new poll
+    FOLLOWED_POLL_COMMENT = (
+        "followed_poll_comment",
+        "Followed Poll Comment",
+    )  # New comment on a poll you follow
     FOLLOWED_COMMENT_REPLY = (
         "followed_comment_reply",
         "Followed Comment Reply",
     )  # New reply on a comment you follow
 
     # === MILESTONE NOTIFICATIONS ===
+    VOTE_MILESTONE = (
+        "vote_milestone",
+        "Vote Milestone",
+    )  # Your poll reached X votes
     LIKE_MILESTONE = (
         "like_milestone",
         "Like Milestone",
-    )  # Your post/comment reached X likes
+    )  # Your poll/comment reached X likes
     SHARE_MILESTONE = (
         "share_milestone",
         "Share Milestone",
-    )  # Your post was shared X times
-    # Todo: Your post or comment was shared X times
+    )  # Your poll was shared X times
     BOOKMARK_MILESTONE = (
         "bookmark_milestone",
         "Bookmark Milestone",
-    )  # Your post was bookmarked X times
-    IMPRESSION_MILESTONE = (
-        "impression_milestone",
-        "Impression Milestone",
-    )  # Your post reached X impressions
-    # Todo: Your post or comment reached X impressions
+    )  # Your poll was bookmarked X times
+    VIEW_MILESTONE = (
+        "view_milestone",
+        "View Milestone",
+    )  # Your poll reached X views
     FOLLOWER_MILESTONE = (
         "follower_milestone",
         "Follower Milestone",
@@ -57,7 +74,7 @@ class NotificationType(models.TextChoices):
     REPLIES_MILESTONE = (
         "replies_milestone",
         "Replies Milestone",
-    )  # Your post or comment received X replies
+    )  # Your poll or comment received X replies
 
     # === SYSTEM NOTIFICATIONS ===
     VERIFICATION = "verification", "Verification"
@@ -76,28 +93,26 @@ class NotificationPriority(models.TextChoices):
 
 class Notification(models.Model):
     """
-    Simplified notification model support for public profiles.
+    Simplified notification model for PseudonymousProfile.
     """
 
-    # Recipient (always Public profile)
-    recipient_content_type = models.ForeignKey(
-        ContentType, on_delete=models.CASCADE, related_name="notifications_received"
+    # Recipient (PseudonymousProfile)
+    recipient = models.ForeignKey(
+        "profile.PseudonymousProfile",
+        on_delete=models.CASCADE,
+        related_name="notifications_received",
     )
-    recipient_object_id = models.PositiveIntegerField()
-    recipient = GenericForeignKey("recipient_content_type", "recipient_object_id")
 
-    # Actor (who triggered the notification - always public)
-    actor_content_type = models.ForeignKey(
-        ContentType,
+    # Actor (who triggered the notification - PseudonymousProfile)
+    actor = models.ForeignKey(
+        "profile.PseudonymousProfile",
         on_delete=models.CASCADE,
         related_name="notifications_sent",
         null=True,
         blank=True,
     )
-    actor_object_id = models.PositiveIntegerField(null=True, blank=True)
-    actor = GenericForeignKey("actor_content_type", "actor_object_id")
 
-    # Target object (post, comment, etc. that the notification is about)
+    # Target object (poll, comment, etc. that the notification is about)
     target_content_type = models.ForeignKey(
         ContentType,
         on_delete=models.CASCADE,
@@ -165,12 +180,10 @@ class Notification(models.Model):
 
     class Meta:
         indexes = [
-            models.Index(
-                fields=["recipient_content_type", "recipient_object_id", "-created_at"]
-            ),
+            models.Index(fields=["recipient", "-created_at"]),
             models.Index(fields=["notification_type", "-created_at"]),
             models.Index(fields=["is_read", "-created_at"]),
-            models.Index(fields=["actor_content_type", "actor_object_id"]),
+            models.Index(fields=["actor", "-created_at"]),
             models.Index(fields=["target_content_type", "target_object_id"]),
         ]
         ordering = ["-created_at"]
@@ -203,22 +216,24 @@ class Notification(models.Model):
         return False
 
 
-class PostFollow(models.Model):
+class PollFollow(models.Model):
     """
-    Simplified model to track which users follow which posts
-    Only notifies about comments on the post
+    Simplified model to track which users follow which polls
+    Only notifies about comments on the poll
     """
 
-    # Follower (always Public profile)
-    follower_content_type = models.ForeignKey(
-        ContentType, on_delete=models.CASCADE, related_name="post_follows"
+    # Follower (PseudonymousProfile)
+    follower = models.ForeignKey(
+        "profile.PseudonymousProfile",
+        on_delete=models.CASCADE,
+        related_name="poll_follows",
     )
-    follower_object_id = models.PositiveIntegerField()
-    follower = GenericForeignKey("follower_content_type", "follower_object_id")
 
-    # Post being followed
-    post = models.ForeignKey(
-        "posts.Post", on_delete=models.CASCADE, related_name="followers"
+    # Poll being followed
+    poll = models.ForeignKey(
+        "profile.Poll",
+        on_delete=models.CASCADE,
+        related_name="followers",
     )
 
     # Follow settings
@@ -232,11 +247,14 @@ class PostFollow(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ["follower_content_type", "follower_object_id", "post"]
+        unique_together = ["follower", "poll"]
         indexes = [
-            models.Index(fields=["post", "is_active"]),
-            models.Index(fields=["follower_content_type", "follower_object_id"]),
+            models.Index(fields=["poll", "is_active"]),
+            models.Index(fields=["follower", "-created_at"]),
         ]
+
+    def __str__(self):
+        return f"{self.follower.username} follows {self.poll.title}"
 
 
 class CommentFollow(models.Model):
@@ -245,16 +263,18 @@ class CommentFollow(models.Model):
     Only notifies about replies to the comment
     """
 
-    # Follower (always Public profile)
-    follower_content_type = models.ForeignKey(
-        ContentType, on_delete=models.CASCADE, related_name="comment_follows"
+    # Follower (PseudonymousProfile)
+    follower = models.ForeignKey(
+        "profile.PseudonymousProfile",
+        on_delete=models.CASCADE,
+        related_name="comment_follows",
     )
-    follower_object_id = models.PositiveIntegerField()
-    follower = GenericForeignKey("follower_content_type", "follower_object_id")
 
     # Comment being followed
     comment = models.ForeignKey(
-        "comments.GenericComment", on_delete=models.CASCADE, related_name="followers"
+        "profile.GenericComment",
+        on_delete=models.CASCADE,
+        related_name="followers",
     )
 
     # Follow settings
@@ -268,17 +288,20 @@ class CommentFollow(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ["follower_content_type", "follower_object_id", "comment"]
+        unique_together = ["follower", "comment"]
         indexes = [
             models.Index(fields=["comment", "is_active"]),
-            models.Index(fields=["follower_content_type", "follower_object_id"]),
+            models.Index(fields=["follower", "-created_at"]),
         ]
+
+    def __str__(self):
+        return f"{self.follower.username} follows comment {self.comment.id}"
 
 
 class FCMDevice(models.Model):
     """
     FCM device tokens for push notifications
-    Only supports Public profiles (Anonymous profiles are interconnected)
+    Supports PseudonymousProfile for push notifications
     """
 
     DEVICE_TYPE_CHOICES = [
@@ -287,9 +310,11 @@ class FCMDevice(models.Model):
         ("web", "Web"),
     ]
 
-    # Only Public profiles can register for push notifications
+    # PseudonymousProfile can register for push notifications
     profile = models.ForeignKey(
-        "profiles.PublicProfile", on_delete=models.CASCADE, related_name="fcm_devices"
+        "profile.PseudonymousProfile",
+        on_delete=models.CASCADE,
+        related_name="fcm_devices",
     )
 
     # FCM token
@@ -315,7 +340,7 @@ class FCMDevice(models.Model):
         ]
 
     def __str__(self):
-        return f"FCM Device for {self.profile.handle} ({self.device_type})"
+        return f"FCM Device for {self.profile.username} ({self.device_type})"
 
 
 class NotificationPreference(models.Model):
@@ -323,10 +348,12 @@ class NotificationPreference(models.Model):
     User preferences for notification delivery and types
     """
 
-    # Profile (always Public profile)
-    profile_content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
-    profile_object_id = models.PositiveIntegerField()
-    profile = GenericForeignKey("profile_content_type", "profile_object_id")
+    # Profile (PseudonymousProfile)
+    profile = models.ForeignKey(
+        "profile.PseudonymousProfile",
+        on_delete=models.CASCADE,
+        related_name="notification_preferences",
+    )
 
     # Notification type preferences
     notification_type = models.CharField(
@@ -352,36 +379,31 @@ class NotificationPreference(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = [
-            "profile_content_type",
-            "profile_object_id",
-            "notification_type",
-        ]
+        unique_together = ["profile", "notification_type"]
         indexes = [
-            models.Index(fields=["profile_content_type", "profile_object_id"]),
+            models.Index(fields=["profile", "notification_type"]),
             models.Index(fields=["notification_type"]),
         ]
+
+    def __str__(self):
+        return f"{self.profile.username} - {self.notification_type}"
 
     @classmethod
     def _create_default_preference_object(cls, profile, notification_type):
         """Create a default preference object WITHOUT saving to database"""
-        from keyoconnect.profiles.models import PublicProfile
-
-        can_receive_push = isinstance(profile, PublicProfile)
-
         # Create object but don't save
         preference = cls(
-            profile_content_type=ContentType.objects.get_for_model(profile),
-            profile_object_id=profile.id,
+            profile=profile,
             notification_type=notification_type,
             in_app_enabled=True,
-            push_enabled=can_receive_push
-            and notification_type
+            push_enabled=notification_type
             in [
-                NotificationType.COMMENT,
+                NotificationType.POLL_COMMENT,
+                NotificationType.POLL_VOTE,
                 NotificationType.REPLY,
                 NotificationType.FOLLOW,
                 NotificationType.MENTION,
+                NotificationType.COMMUNITY_INVITE,
             ],
             email_enabled=notification_type
             in [
@@ -389,34 +411,29 @@ class NotificationPreference(models.Model):
                 NotificationType.MENTION,
                 NotificationType.VERIFICATION,
                 NotificationType.REPLIES_MILESTONE,
+                NotificationType.VOTE_MILESTONE,
+                NotificationType.COMMUNITY_INVITE,
             ],
         )
-
-        # Set the profile relationship manually since we're not saving
-        preference.profile = profile
 
         return preference
 
     @classmethod
     def get_or_create_for_type(cls, profile, notification_type):
         """Get or create a single preference for a specific notification type"""
-        from keyoconnect.profiles.models import PublicProfile
-
-        can_receive_push = isinstance(profile, PublicProfile)
-
         preference, created = cls.objects.get_or_create(
-            profile_content_type=ContentType.objects.get_for_model(profile),
-            profile_object_id=profile.id,
+            profile=profile,
             notification_type=notification_type,
             defaults={
                 "in_app_enabled": True,
-                "push_enabled": can_receive_push
-                and notification_type
+                "push_enabled": notification_type
                 in [
-                    NotificationType.COMMENT,
+                    NotificationType.POLL_COMMENT,
+                    NotificationType.POLL_VOTE,
                     NotificationType.REPLY,
                     NotificationType.FOLLOW,
                     NotificationType.MENTION,
+                    NotificationType.COMMUNITY_INVITE,
                 ],
                 "email_enabled": notification_type
                 in [
@@ -424,6 +441,8 @@ class NotificationPreference(models.Model):
                     NotificationType.MENTION,
                     NotificationType.VERIFICATION,
                     NotificationType.REPLIES_MILESTONE,
+                    NotificationType.VOTE_MILESTONE,
+                    NotificationType.COMMUNITY_INVITE,
                 ],
             },
         )
@@ -431,6 +450,48 @@ class NotificationPreference(models.Model):
 
     def can_receive_push(self):
         """Check if this profile can receive push notifications"""
-        from keyoconnect.profiles.models import PublicProfile
+        # All PseudonymousProfiles can receive push notifications
+        return True
 
-        return isinstance(self.profile, PublicProfile)
+
+class ProfileFollow(models.Model):
+    """
+    Track user follows - who follows whom
+    """
+
+    # Follower (who is following)
+    follower = models.ForeignKey(
+        "profile.PseudonymousProfile",
+        on_delete=models.CASCADE,
+        related_name="following",
+    )
+
+    # Following (who is being followed)
+    following = models.ForeignKey(
+        "profile.PseudonymousProfile",
+        on_delete=models.CASCADE,
+        related_name="followers",
+    )
+
+    # Follow settings
+    is_active = models.BooleanField(default=True)
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ["follower", "following"]
+        indexes = [
+            models.Index(fields=["follower", "is_active"]),
+            models.Index(fields=["following", "is_active"]),
+            models.Index(fields=["-created_at"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=~models.Q(follower=models.F("following")), name="no_self_follow"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.follower.username} follows {self.following.username}"

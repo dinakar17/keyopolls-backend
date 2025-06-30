@@ -130,38 +130,38 @@ loggers:
     handlers: [console, file_general, file_errors, file_debug]
     propagate: false
 
-  # KeyoConnect apps
-  keyoconnect:
+  # keyopolls apps
+  keyopolls:
     level: DEBUG
     handlers: [console, file_general, file_errors, file_debug]
     propagate: false
 
-  keyoconnect.common:
+  keyopolls.common:
     level: DEBUG
     handlers: [console, file_general, file_errors, file_debug]
     propagate: false
 
-  keyoconnect.comments:
+  keyopolls.comments:
     level: DEBUG
     handlers: [console, file_general, file_errors, file_debug]
     propagate: false
 
-  keyoconnect.posts:
+  keyopolls.posts:
     level: DEBUG
     handlers: [console, file_general, file_errors, file_debug]
     propagate: false
 
-  keyoconnect.profiles:
+  keyopolls.profiles:
     level: DEBUG
     handlers: [console, file_general, file_errors, file_debug]
     propagate: false
 
-  keyoconnect.communities:
+  keyopolls.communities:
     level: DEBUG
     handlers: [console, file_general, file_errors, file_debug]
     propagate: false
 
-  keyoconnect.articles:
+  keyopolls.articles:
     level: DEBUG
     handlers: [console, file_general, file_errors, file_debug]
     propagate: false

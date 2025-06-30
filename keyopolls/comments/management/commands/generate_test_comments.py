@@ -5,10 +5,10 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from faker import Faker
+from keyopolls.profiles.models import AnonymousProfile, PublicProfile
 
 # Import your models (adjusted for new architecture)
-from keyoconnect.comments.models import GenericComment
-from keyoconnect.profiles.models import AnonymousProfile, PublicProfile
+from keyopolls.comments.models import GenericComment
 
 fake = Faker()
 

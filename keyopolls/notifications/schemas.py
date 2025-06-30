@@ -1,8 +1,9 @@
 from typing import Dict, List, Optional
 
-from keyoconnect.profiles.schemas import AuthorSchema
 from ninja import Schema
 from shared.schemas import PaginationSchema
+
+from keyopolls.profile.schemas import AuthorSchema
 
 
 class TargetInfoSchema(Schema):

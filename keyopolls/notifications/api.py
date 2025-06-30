@@ -5,24 +5,25 @@ from django.contrib.contenttypes.models import ContentType
 from django.db.models import Count, Q
 from django.http import HttpRequest
 from django.utils import timezone
-from keyoconnect.connect_notifications.models import (
+from ninja import Query, Router
+from shared.schemas import Message
+
+from keyopolls.notifications.models import (
     Notification,
     NotificationPriority,
     NotificationType,
 )
-from keyoconnect.connect_notifications.schemas import (
+from keyopolls.notifications.schemas import (
     NotificationActionResponse,
     NotificationSchema,
     NotificationsListResponse,
     NotificationSummaryResponse,
 )
-from keyoconnect.profiles.middleware import OptionalPublicJWTAuth
-from keyoconnect.profiles.models import AnonymousProfile, PublicProfile
-from keyoconnect.utils import get_author_info
-from ninja import Query, Router
-from shared.schemas import Message
+from keyopolls.profile.middleware import OptionalPseudonymousJWTAuth
+from keyopolls.profile.models import PseudonymousProfile
+from keyopolls.utils import get_author_info
 
-router = Router(tags=["Connect Notifications"])
+router = Router(tags=["Notifications"])
 
 
 # Helper Functions
@@ -33,30 +34,18 @@ def get_actor_info(notification: Notification) -> Optional[dict]:
 
     actor = notification.actor
 
-    # Handle different profile types
-    if isinstance(actor, PublicProfile):
-        return get_author_info(profile_id=actor.id, profile_type="public")
-    elif isinstance(actor, AnonymousProfile):
-        # Get anonymous identifier from the target
-        anonymous_identifier = None
-
-        # Try to get identifier from various sources
-        if hasattr(actor, "anonymous_post_identifier"):
-            anonymous_identifier = actor.anonymous_post_identifier
-
+    # For PseudonymousProfile
+    if isinstance(actor, PseudonymousProfile):
         return get_author_info(
-            profile_id=actor.id,
-            profile_type="anonymous",
-            anonymous_identifier=anonymous_identifier,
+            profile=actor,
         )
 
     # Fallback for unknown profile types
     return {
         "id": actor.id if hasattr(actor, "id") else None,
         "display_name": str(actor),
-        "username": None,
+        "username": getattr(actor, "username", None),
         "profile_picture": None,
-        "profile_type": "unknown",
         "followers": 0,
         "following": 0,
         "is_verified": False,
@@ -72,68 +61,50 @@ def get_target_info(notification: Notification) -> Optional[dict]:
     target_type = notification.target_content_type.model
 
     # Handle different target types
-    if target_type == "post":
-        # Get post author info
-        post_author_info = None
-        if hasattr(target, "profile_type") and hasattr(target, "profile_id"):
-            # For posts with profile_type and profile_id structure
-            anonymous_identifier = getattr(target, "anonymous_post_identifier", None)
-            post_author_info = get_author_info(
-                profile_id=target.profile_id,
-                profile_type=target.profile_type,
-                anonymous_identifier=anonymous_identifier,
-            )
-        elif hasattr(target, "public_profile") and target.public_profile:
-            post_author_info = get_author_info(
-                profile_id=target.public_profile.id, profile_type="public"
-            )
-        elif hasattr(target, "anonymous_profile") and target.anonymous_profile:
-            anonymous_identifier = getattr(target, "anonymous_post_identifier", None)
-            post_author_info = get_author_info(
-                profile_id=target.anonymous_profile.id,
-                profile_type="anonymous",
-                anonymous_identifier=anonymous_identifier,
+    if target_type == "poll":
+        # Get poll author info
+        poll_author_info = None
+        if hasattr(target, "profile") and target.profile:
+            poll_author_info = get_author_info(
+                profile=target.profile, anonymous_identifier=None
             )
 
         return {
-            "type": "post",
+            "type": "poll",
             "id": target.id,
-            "title": (
-                target.content[:100] + "..."
-                if len(target.content) > 100
-                else target.content
+            "title": target.title,
+            "description": (
+                target.description[:100] + "..."
+                if target.description and len(target.description) > 100
+                else target.description or ""
             ),
+            "poll_type": getattr(target, "poll_type", "unknown"),
+            "total_votes": getattr(target, "total_votes", 0),
             "author": (
-                post_author_info.get("display_name", "Unknown")
-                if post_author_info
+                poll_author_info.get("display_name", "Unknown")
+                if poll_author_info
                 else "Unknown"
             ),
-            "author_info": post_author_info,
+            "author_info": poll_author_info,
         }
 
     elif target_type == "genericcomment":
         # Get comment author info
         comment_author_info = None
-        if hasattr(target, "profile_type") and hasattr(target, "profile_id"):
-            anonymous_identifier = getattr(target, "anonymous_comment_identifier", None)
+        if hasattr(target, "profile") and target.profile:
             comment_author_info = get_author_info(
-                profile_id=target.profile_id,
-                profile_type=target.profile_type,
-                anonymous_identifier=anonymous_identifier,
+                profile=target.profile,
             )
 
-        # Get post info if comment belongs to a post
-        post_info = None
+        # Get poll info if comment belongs to a poll
+        poll_info = None
         if hasattr(target, "content_object") and target.content_object:
             content_obj = target.content_object
-            if hasattr(content_obj, "id") and hasattr(content_obj, "content"):
-                post_info = {
+            if hasattr(content_obj, "id") and hasattr(content_obj, "title"):
+                poll_info = {
                     "id": content_obj.id,
-                    "title": (
-                        content_obj.content[:50] + "..."
-                        if len(content_obj.content) > 50
-                        else content_obj.content
-                    ),
+                    "title": content_obj.title,
+                    "poll_type": getattr(content_obj, "poll_type", "unknown"),
                 }
 
         return {
@@ -144,36 +115,37 @@ def get_target_info(notification: Notification) -> Optional[dict]:
                 if len(target.content) > 100
                 else target.content
             ),
+            "depth": getattr(target, "depth", 0),
             "author": (
                 comment_author_info.get("display_name", "Unknown")
                 if comment_author_info
                 else "Unknown"
             ),
             "author_info": comment_author_info,
-            "post_info": post_info,
+            "poll_info": poll_info,
         }
 
-    elif target_type in ["publicprofile", "anonymousprofile"]:
+    elif target_type == "pseudonymousprofile":
         # For profile targets, use get_author_info directly
-        profile_type = "public" if target_type == "publicprofile" else "anonymous"
-        anonymous_identifier = (
-            getattr(target, "anonymous_post_identifier", None)
-            if profile_type == "anonymous"
-            else None
-        )
-
-        profile_info = get_author_info(
-            profile_id=target.id,
-            profile_type=profile_type,
-            anonymous_identifier=anonymous_identifier,
-        )
+        profile_info = get_author_info(profile=target, anonymous_identifier=None)
 
         return {
             "type": "profile",
             "id": target.id,
-            "display_name": profile_info.get("display_name", "Unknown"),
-            "username": profile_info.get("username"),
+            "username": target.username,
+            "display_name": target.display_name,
+            "total_aura": target.total_aura,
             "profile_info": profile_info,
+        }
+
+    elif target_type == "community":
+        # For community targets
+        return {
+            "type": "community",
+            "id": target.id,
+            "name": getattr(target, "name", "Unknown Community"),
+            "member_count": getattr(target, "member_count", 0),
+            "community_type": getattr(target, "community_type", "public"),
         }
 
     # Fallback for unknown target types
@@ -209,34 +181,11 @@ def format_notification(notification: Notification) -> NotificationSchema:
     )
 
 
-def build_notifications_filter(public_profile: PublicProfile) -> Q:
-    """Build Q filter for notifications based on public profile"""
-    # Get notifications for public profile
-    public_ct = ContentType.objects.get_for_model(PublicProfile)
-    notifications_filter = Q(
-        recipient_content_type=public_ct, recipient_object_id=public_profile.id
-    )
-
-    # Also get notifications for the linked anonymous profile if it exists
-    try:
-        if public_profile.anonymous_profile:
-            anonymous_ct = ContentType.objects.get_for_model(AnonymousProfile)
-            notifications_filter |= Q(
-                recipient_content_type=anonymous_ct,
-                recipient_object_id=public_profile.anonymous_profile.id,
-            )
-    except AttributeError:
-        # Anonymous profile doesn't exist
-        pass
-
-    return notifications_filter
-
-
 # API Endpoints
 @router.get(
     "/notifications",
     response={200: NotificationsListResponse, 400: Message},
-    auth=OptionalPublicJWTAuth,
+    auth=OptionalPseudonymousJWTAuth,
 )
 def get_notifications(
     request: HttpRequest,
@@ -253,13 +202,10 @@ def get_notifications(
     is_read: Optional[bool] = Query(None, description="Filter by read status"),
     is_clicked: Optional[bool] = Query(None, description="Filter by clicked status"),
     # Actor filters
-    actor_type: Optional[str] = Query(
-        None, description="Filter by actor profile type (public, anonymous)"
-    ),
     actor_id: Optional[int] = Query(None, description="Filter by specific actor ID"),
     # Target filters
     target_type: Optional[str] = Query(
-        None, description="Filter by target type (post, comment, profile)"
+        None, description="Filter by target type (poll, comment, profile, community)"
     ),
     target_id: Optional[int] = Query(None, description="Filter by specific target ID"),
     # Date filters
@@ -290,23 +236,17 @@ def get_notifications(
 ) -> Tuple[int, NotificationsListResponse]:
     """
     Get notifications for authenticated user with comprehensive filtering options.
-
-    Supports notifications for both public and anonymous profiles through
-    OptionalPublicJWTAuth.
     """
 
-    # Get authenticated public profile
-    public_profile = request.auth
+    # Get authenticated profile
+    profile = request.auth
 
-    if not public_profile:
+    if not profile:
         return 400, {"message": "Authentication required"}
 
-    # Build base queryset for user's notifications (public + anonymous)
-    notifications_filter = build_notifications_filter(public_profile)
-
-    # Start with base queryset
-    queryset = Notification.objects.filter(notifications_filter).select_related(
-        "recipient_content_type", "actor_content_type", "target_content_type"
+    # Start with base queryset for user's notifications
+    queryset = Notification.objects.filter(recipient=profile).select_related(
+        "actor", "target_content_type"
     )
 
     # Applied filters tracking
@@ -336,49 +276,27 @@ def get_notifications(
         applied_filters["is_clicked"] = is_clicked
 
     # Actor filters
-    if actor_type:
-        if actor_type == "public":
-            public_ct = ContentType.objects.get_for_model(PublicProfile)
-            queryset = queryset.filter(actor_content_type=public_ct)
-            applied_filters["actor_type"] = actor_type
-        elif actor_type == "anonymous":
-            anonymous_ct = ContentType.objects.get_for_model(AnonymousProfile)
-            queryset = queryset.filter(actor_content_type=anonymous_ct)
-            applied_filters["actor_type"] = actor_type
-        else:
-            return 400, {"message": f"Invalid actor_type: {actor_type}"}
-
     if actor_id:
-        queryset = queryset.filter(actor_object_id=actor_id)
+        queryset = queryset.filter(actor_id=actor_id)
         applied_filters["actor_id"] = actor_id
 
     # Target filters
     if target_type:
         # Map target type to content type
         target_model_map = {
-            "post": "post",
-            "comment": "genericcomment",  # Updated to match your model name
-            "profile": ["publicprofile", "anonymousprofile"],
+            "poll": "poll",
+            "comment": "genericcomment",
+            "profile": "pseudonymousprofile",
+            "community": "community",
         }
 
         if target_type in target_model_map:
-            target_models = target_model_map[target_type]
-            if isinstance(target_models, list):
-                target_filter = Q()
-                for model_name in target_models:
-                    try:
-                        ct = ContentType.objects.get(model=model_name)
-                        target_filter |= Q(target_content_type=ct)
-                    except ContentType.DoesNotExist:
-                        pass
-                queryset = queryset.filter(target_filter)
-            else:
-                try:
-                    ct = ContentType.objects.get(model=target_models)
-                    queryset = queryset.filter(target_content_type=ct)
-                except ContentType.DoesNotExist:
-                    return 400, {"message": f"Invalid target_type: {target_type}"}
-            applied_filters["target_type"] = target_type
+            try:
+                ct = ContentType.objects.get(model=target_model_map[target_type])
+                queryset = queryset.filter(target_content_type=ct)
+                applied_filters["target_type"] = target_type
+            except ContentType.DoesNotExist:
+                return 400, {"message": f"Invalid target_type: {target_type}"}
         else:
             return 400, {"message": f"Invalid target_type: {target_type}"}
 
@@ -511,7 +429,7 @@ def get_notifications(
 @router.patch(
     "/notifications/{notification_id}/read",
     response={200: NotificationActionResponse, 400: Message, 404: Message},
-    auth=OptionalPublicJWTAuth,
+    auth=OptionalPseudonymousJWTAuth,
 )
 def mark_notification_read(
     request: HttpRequest,
@@ -519,20 +437,15 @@ def mark_notification_read(
 ) -> Tuple[int, NotificationActionResponse]:
     """Mark a specific notification as read"""
 
-    public_profile = request.auth
+    profile = request.auth
 
-    if not public_profile:
+    if not profile:
         return 400, {"message": "Authentication required"}
 
     try:
-        # Build recipient filter for user's notifications
-        recipient_filter = build_notifications_filter(public_profile)
-
-        notification = (
-            Notification.objects.filter(id=notification_id)
-            .filter(recipient_filter)
-            .first()
-        )
+        notification = Notification.objects.filter(
+            id=notification_id, recipient=profile
+        ).first()
 
         if not notification:
             return 404, {"message": "Notification not found"}
@@ -548,9 +461,43 @@ def mark_notification_read(
 
 
 @router.patch(
+    "/notifications/{notification_id}/clicked",
+    response={200: NotificationActionResponse, 400: Message, 404: Message},
+    auth=OptionalPseudonymousJWTAuth,
+)
+def mark_notification_clicked(
+    request: HttpRequest,
+    notification_id: int,
+) -> Tuple[int, NotificationActionResponse]:
+    """Mark a specific notification as clicked"""
+
+    profile = request.auth
+
+    if not profile:
+        return 400, {"message": "Authentication required"}
+
+    try:
+        notification = Notification.objects.filter(
+            id=notification_id, recipient=profile
+        ).first()
+
+        if not notification:
+            return 404, {"message": "Notification not found"}
+
+        notification.mark_as_clicked()
+
+        return 200, NotificationActionResponse(
+            success=True, message="Notification marked as clicked"
+        )
+
+    except Exception as e:
+        return 400, {"message": f"Error marking notification as clicked: {str(e)}"}
+
+
+@router.patch(
     "/notifications/read-all",
     response={200: NotificationActionResponse, 400: Message},
-    auth=OptionalPublicJWTAuth,
+    auth=OptionalPseudonymousJWTAuth,
 )
 def mark_all_notifications_read(
     request: HttpRequest,
@@ -560,16 +507,13 @@ def mark_all_notifications_read(
 ) -> Tuple[int, NotificationActionResponse]:
     """Mark all notifications as read for the authenticated user"""
 
-    public_profile = request.auth
+    profile = request.auth
 
-    if not public_profile:
+    if not profile:
         return 400, {"message": "Authentication required"}
 
-    # Build recipient filter for user's notifications
-    recipient_filter = build_notifications_filter(public_profile)
-
     # Get unread notifications
-    queryset = Notification.objects.filter(recipient_filter, is_read=False)
+    queryset = Notification.objects.filter(recipient=profile, is_read=False)
 
     # Apply type filter if specified
     if notification_type:
@@ -590,7 +534,7 @@ def mark_all_notifications_read(
 @router.delete(
     "/notifications/{notification_id}",
     response={200: NotificationActionResponse, 400: Message, 404: Message},
-    auth=OptionalPublicJWTAuth,
+    auth=OptionalPseudonymousJWTAuth,
 )
 def delete_notification(
     request: HttpRequest,
@@ -598,20 +542,15 @@ def delete_notification(
 ) -> Tuple[int, NotificationActionResponse]:
     """Delete a specific notification"""
 
-    public_profile = request.auth
+    profile = request.auth
 
-    if not public_profile:
+    if not profile:
         return 400, {"message": "Authentication required"}
 
     try:
-        # Build recipient filter for user's notifications
-        recipient_filter = build_notifications_filter(public_profile)
-
-        notification = (
-            Notification.objects.filter(id=notification_id)
-            .filter(recipient_filter)
-            .first()
-        )
+        notification = Notification.objects.filter(
+            id=notification_id, recipient=profile
+        ).first()
 
         if not notification:
             return 404, {"message": "Notification not found"}
@@ -626,25 +565,69 @@ def delete_notification(
         return 400, {"message": f"Error deleting notification: {str(e)}"}
 
 
+@router.delete(
+    "/notifications/clear-all",
+    response={200: NotificationActionResponse, 400: Message},
+    auth=OptionalPseudonymousJWTAuth,
+)
+def clear_all_notifications(
+    request: HttpRequest,
+    notification_type: Optional[str] = Query(
+        None, description="Clear only specific type"
+    ),
+    read_only: bool = Query(False, description="Clear only read notifications"),
+) -> Tuple[int, NotificationActionResponse]:
+    """Clear all notifications for the authenticated user"""
+
+    profile = request.auth
+
+    if not profile:
+        return 400, {"message": "Authentication required"}
+
+    try:
+        # Start with user's notifications
+        queryset = Notification.objects.filter(recipient=profile)
+
+        # Apply filters
+        if notification_type:
+            queryset = queryset.filter(notification_type=notification_type)
+
+        if read_only:
+            queryset = queryset.filter(is_read=True)
+
+        # Delete notifications
+        deleted_count, _ = queryset.delete()
+
+        message = f"Cleared {deleted_count} notification(s)"
+        if notification_type:
+            message += f" of type '{notification_type}'"
+        if read_only:
+            message += " (read only)"
+
+        return 200, NotificationActionResponse(
+            success=True, message=message, updated_count=deleted_count
+        )
+
+    except Exception as e:
+        return 400, {"message": f"Error clearing notifications: {str(e)}"}
+
+
 @router.get(
     "/notifications/summary",
     response={200: NotificationSummaryResponse, 400: Message},
-    auth=OptionalPublicJWTAuth,
+    auth=OptionalPseudonymousJWTAuth,
 )
 def get_notifications_summary(
     request: HttpRequest,
 ) -> Tuple[int, NotificationSummaryResponse]:
     """Get summary statistics for user's notifications"""
 
-    public_profile = request.auth
+    profile = request.auth
 
-    if not public_profile:
+    if not profile:
         return 400, {"message": "Authentication required"}
 
-    # Build recipient filter for user's notifications
-    recipient_filter = build_notifications_filter(public_profile)
-
-    queryset = Notification.objects.filter(recipient_filter)
+    queryset = Notification.objects.filter(recipient=profile)
 
     # Calculate various statistics
     total_count = queryset.count()
@@ -696,3 +679,39 @@ def get_notifications_summary(
     )
 
     return 200, summary
+
+
+@router.get(
+    "/notifications/unread-count",
+    response={200: dict, 400: Message},
+    auth=OptionalPseudonymousJWTAuth,
+)
+def get_unread_count(
+    request: HttpRequest,
+) -> Tuple[int, dict]:
+    """Get quick unread count for badges/indicators"""
+
+    profile = request.auth
+
+    if not profile:
+        return 400, {"message": "Authentication required"}
+
+    unread_count = Notification.objects.filter(recipient=profile, is_read=False).count()
+
+    # Get unread count by type for detailed badges
+    unread_by_type = {}
+    if unread_count > 0:
+        unread_types = (
+            Notification.objects.filter(recipient=profile, is_read=False)
+            .values("notification_type")
+            .annotate(count=Count("notification_type"))
+        )
+        unread_by_type = {
+            item["notification_type"]: item["count"] for item in unread_types
+        }
+
+    return 200, {
+        "unread_count": unread_count,
+        "unread_by_type": unread_by_type,
+        "has_unread": unread_count > 0,
+    }

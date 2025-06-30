@@ -2,12 +2,14 @@ import logging
 from datetime import timedelta
 
 from celery import shared_task
-from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
-from keyoconnect.comments.models import GenericComment
-from keyoconnect.connect_notifications.models import Notification
-from keyoconnect.connect_notifications.services import AsyncNotificationService
-from keyoconnect.posts.models import Post
+
+from keyopolls.comments.models import GenericComment
+from keyopolls.communities.models import Community
+from keyopolls.notifications.models import Notification
+from keyopolls.notifications.services import AsyncNotificationService
+from keyopolls.polls.models import Poll, PollOption
+from keyopolls.profile.models import PseudonymousProfile
 
 logger = logging.getLogger(__name__)
 
@@ -51,44 +53,58 @@ def send_email_notification_task(self, notification_id):
         return {"success": False, "error": str(exc)}
 
 
-# === POST OWNER NOTIFICATION TASKS ===
+# === POLL OWNER NOTIFICATION TASKS ===
 
 
 @shared_task(bind=True, max_retries=2)
-def notify_post_comment_task(
-    self, post_id, comment_id, actor_id, actor_type, send_push=True
-):
-    """Async task to notify post owner about new comment"""
+def notify_poll_comment_task(self, poll_id, comment_id, actor_id, send_push=True):
+    """Async task to notify poll owner about new comment"""
     try:
-        post = Post.objects.get(id=post_id)
+        poll = Poll.objects.get(id=poll_id)
         comment = GenericComment.objects.get(id=comment_id)
+        actor = PseudonymousProfile.objects.get(id=actor_id)
 
-        # Get actor based on type
-        actor_content_type = ContentType.objects.get(model=actor_type)
-        actor = actor_content_type.get_object_for_this_type(id=actor_id)
-
-        result = AsyncNotificationService.notify_post_comment(
-            post, comment, actor, send_push
+        result = AsyncNotificationService.notify_poll_comment(
+            poll, comment, actor, send_push, use_async=False
         )
         return {"success": True, "notification_id": result.id if result else None}
     except Exception as exc:
-        logger.error(f"Post comment notification task failed: {str(exc)}")
+        logger.error(f"Poll comment notification task failed: {str(exc)}")
         if self.request.retries < self.max_retries:
             raise self.retry(countdown=30, exc=exc)
         return {"success": False, "error": str(exc)}
 
 
 @shared_task(bind=True, max_retries=2)
-def notify_post_milestone_task(self, post_id, milestone_type, count, send_push=True):
-    """Async task to notify post owner about milestone"""
+def notify_poll_vote_task(self, poll_id, voter_id, option_id, send_push=True):
+    """Async task to notify poll owner about new vote"""
     try:
-        post = Post.objects.get(id=post_id)
-        result = AsyncNotificationService.notify_post_milestone(
-            post, milestone_type, count, send_push
+        poll = Poll.objects.get(id=poll_id)
+        voter = PseudonymousProfile.objects.get(id=voter_id)
+        option = PollOption.objects.get(id=option_id)
+
+        result = AsyncNotificationService.notify_poll_vote(
+            poll, voter, option, send_push, use_async=False
         )
         return {"success": True, "notification_id": result.id if result else None}
     except Exception as exc:
-        logger.error(f"Post milestone notification task failed: {str(exc)}")
+        logger.error(f"Poll vote notification task failed: {str(exc)}")
+        if self.request.retries < self.max_retries:
+            raise self.retry(countdown=30, exc=exc)
+        return {"success": False, "error": str(exc)}
+
+
+@shared_task(bind=True, max_retries=2)
+def notify_poll_milestone_task(self, poll_id, milestone_type, count, send_push=True):
+    """Async task to notify poll owner about milestone"""
+    try:
+        poll = Poll.objects.get(id=poll_id)
+        result = AsyncNotificationService.notify_poll_milestone(
+            poll, milestone_type, count, send_push, use_async=False
+        )
+        return {"success": True, "notification_id": result.id if result else None}
+    except Exception as exc:
+        logger.error(f"Poll milestone notification task failed: {str(exc)}")
         if self.request.retries < self.max_retries:
             raise self.retry(countdown=30, exc=exc)
         return {"success": False, "error": str(exc)}
@@ -98,24 +114,19 @@ def notify_post_milestone_task(self, post_id, milestone_type, count, send_push=T
 
 
 @shared_task(bind=True, max_retries=2)
-def notify_comment_reply_task(
-    self, comment_id, reply_id, actor_id, actor_type, send_push=True
-):
+def notify_comment_reply_task(self, comment_id, reply_id, actor_id, send_push=True):
     """Async task to notify comment owner about new reply"""
     try:
         comment = GenericComment.objects.get(id=comment_id)
         reply = GenericComment.objects.get(id=reply_id)
-
-        # Get actor based on type
-        actor_content_type = ContentType.objects.get(model=actor_type)
-        actor = actor_content_type.get_object_for_this_type(id=actor_id)
+        actor = PseudonymousProfile.objects.get(id=actor_id)
 
         result = AsyncNotificationService.notify_comment_reply(
-            comment, reply, actor, send_push
+            comment, reply, actor, send_push, use_async=False
         )
         return {"success": True, "notification_id": result.id if result else None}
     except Exception as exc:
-        logger.error(f"GenericComment reply notification task failed: {str(exc)}")
+        logger.error(f"Comment reply notification task failed: {str(exc)}")
         if self.request.retries < self.max_retries:
             raise self.retry(countdown=30, exc=exc)
         return {"success": False, "error": str(exc)}
@@ -129,11 +140,11 @@ def notify_comment_milestone_task(
     try:
         comment = GenericComment.objects.get(id=comment_id)
         result = AsyncNotificationService.notify_comment_milestone(
-            comment, milestone_type, count, send_push
+            comment, milestone_type, count, send_push, use_async=False
         )
         return {"success": True, "notification_id": result.id if result else None}
     except Exception as exc:
-        logger.error(f"GenericComment milestone notification task failed: {str(exc)}")
+        logger.error(f"Comment milestone notification task failed: {str(exc)}")
         if self.request.retries < self.max_retries:
             raise self.retry(countdown=30, exc=exc)
         return {"success": False, "error": str(exc)}
@@ -143,19 +154,15 @@ def notify_comment_milestone_task(
 
 
 @shared_task(bind=True, max_retries=2)
-def notify_follow_task(
-    self, follower_id, follower_type, followee_id, followee_type, send_push=True
-):
+def notify_follow_task(self, follower_id, followee_id, send_push=True):
     """Async task to notify user about new follower"""
     try:
-        # Get follower and followee based on types
-        follower_content_type = ContentType.objects.get(model=follower_type)
-        followee_content_type = ContentType.objects.get(model=followee_type)
+        follower = PseudonymousProfile.objects.get(id=follower_id)
+        followee = PseudonymousProfile.objects.get(id=followee_id)
 
-        follower = follower_content_type.get_object_for_this_type(id=follower_id)
-        followee = followee_content_type.get_object_for_this_type(id=followee_id)
-
-        result = AsyncNotificationService.notify_follow(follower, followee, send_push)
+        result = AsyncNotificationService.notify_follow(
+            follower, followee, send_push, use_async=False
+        )
         return {"success": True, "notification_id": result.id if result else None}
     except Exception as exc:
         logger.error(f"Follow notification task failed: {str(exc)}")
@@ -165,14 +172,13 @@ def notify_follow_task(
 
 
 @shared_task(bind=True, max_retries=2)
-def notify_follower_milestone_task(self, user_id, user_type, count, send_push=True):
+def notify_follower_milestone_task(self, user_id, count, send_push=True):
     """Async task to notify user about follower milestone"""
     try:
-        user_content_type = ContentType.objects.get(model=user_type)
-        user = user_content_type.get_object_for_this_type(id=user_id)
+        user = PseudonymousProfile.objects.get(id=user_id)
 
         result = AsyncNotificationService.notify_follower_milestone(
-            user, count, send_push
+            user, count, send_push, use_async=False
         )
         return {"success": True, "notification_id": result.id if result else None}
     except Exception as exc:
@@ -186,31 +192,26 @@ def notify_follower_milestone_task(self, user_id, user_type, count, send_push=Tr
 def notify_mention_task(
     self,
     mentioned_user_id,
-    mentioned_user_type,
     actor_id,
-    actor_type,
     target_id,
     target_type,
     send_push=True,
 ):
     """Async task to notify user about mention"""
     try:
-        # Get mentioned user
-        mentioned_user_content_type = ContentType.objects.get(model=mentioned_user_type)
-        mentioned_user = mentioned_user_content_type.get_object_for_this_type(
-            id=mentioned_user_id
-        )
+        mentioned_user = PseudonymousProfile.objects.get(id=mentioned_user_id)
+        actor = PseudonymousProfile.objects.get(id=actor_id)
 
-        # Get actor
-        actor_content_type = ContentType.objects.get(model=actor_type)
-        actor = actor_content_type.get_object_for_this_type(id=actor_id)
-
-        # Get target (post or comment)
-        target_content_type = ContentType.objects.get(model=target_type)
-        target = target_content_type.get_object_for_this_type(id=target_id)
+        # Get target (poll or comment)
+        if target_type == "poll":
+            target = Poll.objects.get(id=target_id)
+        elif target_type == "genericcomment":
+            target = GenericComment.objects.get(id=target_id)
+        else:
+            raise ValueError(f"Unsupported target type: {target_type}")
 
         result = AsyncNotificationService.notify_mention(
-            mentioned_user, actor, target, send_push
+            mentioned_user, actor, target, send_push, use_async=False
         )
         return {"success": True, "notification_id": result.id if result else None}
     except Exception as exc:
@@ -220,42 +221,18 @@ def notify_mention_task(
         return {"success": False, "error": str(exc)}
 
 
-# === FOLLOW-BASED NOTIFICATION TASKS ===
+# === COMMUNITY NOTIFICATION TASKS ===
 
 
 @shared_task(bind=True, max_retries=2)
-def notify_followed_user_post_task(self, post_id, send_push=False):
-    """Async task to notify followers about new post from followed user"""
+def notify_community_new_poll_task(self, community_id, poll_id, send_push=False):
+    """Async task to notify community members about new poll"""
     try:
-        post = Post.objects.get(id=post_id)
-        results = AsyncNotificationService.notify_followed_user_post(post, send_push)
-        return {
-            "success": True,
-            "notifications_sent": len(results),
-            "notification_ids": [n.id for n in results if n],
-        }
-    except Exception as exc:
-        logger.error(f"Followed user post notification task failed: {str(exc)}")
-        if self.request.retries < self.max_retries:
-            raise self.retry(countdown=30, exc=exc)
-        return {"success": False, "error": str(exc)}
+        community = Community.objects.get(id=community_id)
+        poll = Poll.objects.get(id=poll_id)
 
-
-@shared_task(bind=True, max_retries=2)
-def notify_followed_post_comment_task(
-    self, post_id, comment_id, actor_id, actor_type, send_push=False
-):
-    """Async task to notify post followers about new comment"""
-    try:
-        post = Post.objects.get(id=post_id)
-        comment = GenericComment.objects.get(id=comment_id)
-
-        # Get actor
-        actor_content_type = ContentType.objects.get(model=actor_type)
-        actor = actor_content_type.get_object_for_this_type(id=actor_id)
-
-        results = AsyncNotificationService.notify_followed_post_comment(
-            post, comment, actor, send_push
+        results = AsyncNotificationService.notify_community_new_poll(
+            community, poll, send_push, use_async=False
         )
         return {
             "success": True,
@@ -263,7 +240,76 @@ def notify_followed_post_comment_task(
             "notification_ids": [n.id for n in results if n],
         }
     except Exception as exc:
-        logger.error(f"Followed post comment notification task failed: {str(exc)}")
+        logger.error(f"Community new poll notification task failed: {str(exc)}")
+        if self.request.retries < self.max_retries:
+            raise self.retry(countdown=30, exc=exc)
+        return {"success": False, "error": str(exc)}
+
+
+@shared_task(bind=True, max_retries=2)
+def notify_community_invite_task(
+    self, community_id, inviter_id, invitee_id, send_push=True
+):
+    """Async task to notify user about community invitation"""
+    try:
+        community = Community.objects.get(id=community_id)
+        inviter = PseudonymousProfile.objects.get(id=inviter_id)
+        invitee = PseudonymousProfile.objects.get(id=invitee_id)
+
+        result = AsyncNotificationService.notify_community_invite(
+            community, inviter, invitee, send_push, use_async=False
+        )
+        return {"success": True, "notification_id": result.id if result else None}
+    except Exception as exc:
+        logger.error(f"Community invite notification task failed: {str(exc)}")
+        if self.request.retries < self.max_retries:
+            raise self.retry(countdown=30, exc=exc)
+        return {"success": False, "error": str(exc)}
+
+
+# === FOLLOW-BASED NOTIFICATION TASKS ===
+
+
+@shared_task(bind=True, max_retries=2)
+def notify_followed_user_poll_task(self, poll_id, send_push=False):
+    """Async task to notify followers about new poll from followed user"""
+    try:
+        poll = Poll.objects.get(id=poll_id)
+        results = AsyncNotificationService.notify_followed_user_poll(
+            poll, send_push, use_async=False
+        )
+        return {
+            "success": True,
+            "notifications_sent": len(results),
+            "notification_ids": [n.id for n in results if n],
+        }
+    except Exception as exc:
+        logger.error(f"Followed user poll notification task failed: {str(exc)}")
+        if self.request.retries < self.max_retries:
+            raise self.retry(countdown=30, exc=exc)
+        return {"success": False, "error": str(exc)}
+
+
+@shared_task(bind=True, max_retries=2)
+def notify_followed_poll_comment_task(
+    self, poll_id, comment_id, actor_id, send_push=False
+):
+    """Async task to notify poll followers about new comment"""
+    try:
+        poll = Poll.objects.get(id=poll_id)
+        comment = GenericComment.objects.get(id=comment_id)
+        actor = PseudonymousProfile.objects.get(id=actor_id)
+
+        results = AsyncNotificationService.notify_followed_poll_comment(
+            poll, comment, actor, send_push, use_async=False
+        )
+        return {
+            "success": True,
+            "notifications_sent": len(results),
+            "notification_ids": [n.id for n in results if n],
+        }
+    except Exception as exc:
+        logger.error(f"Followed poll comment notification task failed: {str(exc)}")
         if self.request.retries < self.max_retries:
             raise self.retry(countdown=30, exc=exc)
         return {"success": False, "error": str(exc)}
@@ -271,19 +317,16 @@ def notify_followed_post_comment_task(
 
 @shared_task(bind=True, max_retries=2)
 def notify_followed_comment_reply_task(
-    self, comment_id, reply_id, actor_id, actor_type, send_push=False
+    self, comment_id, reply_id, actor_id, send_push=False
 ):
     """Async task to notify comment followers about new reply"""
     try:
         comment = GenericComment.objects.get(id=comment_id)
         reply = GenericComment.objects.get(id=reply_id)
-
-        # Get actor
-        actor_content_type = ContentType.objects.get(model=actor_type)
-        actor = actor_content_type.get_object_for_this_type(id=actor_id)
+        actor = PseudonymousProfile.objects.get(id=actor_id)
 
         results = AsyncNotificationService.notify_followed_comment_reply(
-            comment, reply, actor, send_push
+            comment, reply, actor, send_push, use_async=False
         )
         return {
             "success": True,
@@ -301,38 +344,107 @@ def notify_followed_comment_reply_task(
 
 
 @shared_task(bind=True, max_retries=2)
-def auto_follow_post_task(
-    self, user_id, user_type, post_id, interaction_type="comment"
-):
-    """Async task to auto-follow a post"""
+def auto_follow_poll_task(self, user_id, poll_id, interaction_type="comment"):
+    """Async task to auto-follow a poll"""
     try:
-        from keyoconnect.posts.models import Post
+        user = PseudonymousProfile.objects.get(id=user_id)
+        poll = Poll.objects.get(id=poll_id)
 
-        user_content_type = ContentType.objects.get(model=user_type)
-        user = user_content_type.get_object_for_this_type(id=user_id)
-        post = Post.objects.get(id=post_id)
-
-        result = AsyncNotificationService.auto_follow_post(user, post, interaction_type)
+        result = AsyncNotificationService.auto_follow_poll(
+            user, poll, interaction_type, use_async=False
+        )
         return {"success": True, "follow_created": result is not None}
     except Exception as exc:
-        logger.error(f"Auto follow post task failed: {str(exc)}")
+        logger.error(f"Auto follow poll task failed: {str(exc)}")
         if self.request.retries < self.max_retries:
             raise self.retry(countdown=30, exc=exc)
         return {"success": False, "error": str(exc)}
 
 
 @shared_task(bind=True, max_retries=2)
-def auto_follow_comment_task(self, user_id, user_type, comment_id):
+def auto_follow_comment_task(self, user_id, comment_id):
     """Async task to auto-follow a comment"""
     try:
-        user_content_type = ContentType.objects.get(model=user_type)
-        user = user_content_type.get_object_for_this_type(id=user_id)
+        user = PseudonymousProfile.objects.get(id=user_id)
         comment = GenericComment.objects.get(id=comment_id)
 
-        result = AsyncNotificationService.auto_follow_comment(user, comment)
+        result = AsyncNotificationService.auto_follow_comment(
+            user, comment, use_async=False
+        )
         return {"success": True, "follow_created": result is not None}
     except Exception as exc:
         logger.error(f"Auto follow comment task failed: {str(exc)}")
+        if self.request.retries < self.max_retries:
+            raise self.retry(countdown=30, exc=exc)
+        return {"success": False, "error": str(exc)}
+
+
+# === MILESTONE NOTIFICATION TASKS ===
+
+
+@shared_task(bind=True, max_retries=2)
+def notify_replies_milestone_task(self, target_id, target_type, count, send_push=True):
+    """Async task to notify target owner about replies milestone"""
+    try:
+        # Get target (poll or comment)
+        if target_type == "poll":
+            target = Poll.objects.get(id=target_id)
+            result = AsyncNotificationService.notify_poll_milestone(
+                target, "replies_milestone", count, send_push, use_async=False
+            )
+        elif target_type == "genericcomment":
+            target = GenericComment.objects.get(id=target_id)
+            result = AsyncNotificationService.notify_comment_milestone(
+                target, "replies_milestone", count, send_push, use_async=False
+            )
+        else:
+            raise ValueError(f"Unsupported target type: {target_type}")
+
+        return {"success": True, "notification_id": result.id if result else None}
+    except Exception as exc:
+        logger.error(f"Replies milestone notification task failed: {str(exc)}")
+        if self.request.retries < self.max_retries:
+            raise self.retry(countdown=30, exc=exc)
+        return {"success": False, "error": str(exc)}
+
+
+@shared_task(bind=True, max_retries=2)
+def notify_vote_milestone_task(self, poll_id, count, send_push=True):
+    """Async task to notify poll owner about vote milestone"""
+    try:
+        poll = Poll.objects.get(id=poll_id)
+        result = AsyncNotificationService.notify_poll_milestone(
+            poll, "vote_milestone", count, send_push, use_async=False
+        )
+        return {"success": True, "notification_id": result.id if result else None}
+    except Exception as exc:
+        logger.error(f"Vote milestone notification task failed: {str(exc)}")
+        if self.request.retries < self.max_retries:
+            raise self.retry(countdown=30, exc=exc)
+        return {"success": False, "error": str(exc)}
+
+
+@shared_task(bind=True, max_retries=2)
+def notify_like_milestone_task(self, target_id, target_type, count, send_push=True):
+    """Async task to notify target owner about like milestone"""
+    try:
+        # Get target (poll or comment)
+        if target_type == "poll":
+            target = Poll.objects.get(id=target_id)
+            result = AsyncNotificationService.notify_poll_milestone(
+                target, "like_milestone", count, send_push, use_async=False
+            )
+        elif target_type == "genericcomment":
+            target = GenericComment.objects.get(id=target_id)
+            result = AsyncNotificationService.notify_comment_milestone(
+                target, "like_milestone", count, send_push, use_async=False
+            )
+        else:
+            raise ValueError(f"Unsupported target type: {target_type}")
+
+        return {"success": True, "notification_id": result.id if result else None}
+    except Exception as exc:
+        logger.error(f"Like milestone notification task failed: {str(exc)}")
         if self.request.retries < self.max_retries:
             raise self.retry(countdown=30, exc=exc)
         return {"success": False, "error": str(exc)}
@@ -377,6 +489,54 @@ def batch_send_notifications_task(
         return {"success": False, "error": str(exc)}
 
 
+# === COMMUNITY-SPECIFIC TASKS ===
+
+
+@shared_task(bind=True, max_retries=2)
+def notify_community_role_change_task(
+    self, community_id, member_id, old_role, new_role, actor_id, send_push=True
+):
+    """Async task to notify user about community role change"""
+    try:
+        community = Community.objects.get(id=community_id)
+        member = PseudonymousProfile.objects.get(id=member_id)
+        actor = PseudonymousProfile.objects.get(id=actor_id)
+
+        actor_name = AsyncNotificationService._get_actor_name(actor)
+
+        click_url = AsyncNotificationService.URLBuilder.build_community_url(
+            community.id
+        )
+        deep_link_data = AsyncNotificationService.URLBuilder.build_deep_link_data(
+            "community", {"community_id": community.id}
+        )
+
+        result = AsyncNotificationService.send_notification(
+            recipient=member,
+            notification_type="community_role_change",
+            title="Role Updated",
+            message=f"{actor_name} changed your role in {community.name} to {new_role}",
+            actor=actor,
+            target=community,
+            click_url=click_url,
+            deep_link_data=deep_link_data,
+            extra_data={
+                "old_role": old_role,
+                "new_role": new_role,
+                "community_id": community.id,
+                "community_name": community.name,
+            },
+            send_push=send_push,
+            use_async=False,
+        )
+        return {"success": True, "notification_id": result.id if result else None}
+    except Exception as exc:
+        logger.error(f"Community role change notification task failed: {str(exc)}")
+        if self.request.retries < self.max_retries:
+            raise self.retry(countdown=30, exc=exc)
+        return {"success": False, "error": str(exc)}
+
+
 # === CLEANUP TASKS ===
 
 
@@ -384,7 +544,6 @@ def batch_send_notifications_task(
 def cleanup_old_notifications_task(days_old=30):
     """Async task to cleanup old notifications"""
     try:
-
         cutoff_date = timezone.now() - timedelta(days=days_old)
         deleted_count = Notification.objects.filter(
             created_at__lt=cutoff_date, is_read=True
@@ -397,28 +556,49 @@ def cleanup_old_notifications_task(days_old=30):
         return {"success": False, "error": str(exc)}
 
 
-@shared_task(bind=True, max_retries=2)
-def notify_replies_milestone_task(self, target_id, target_type, count, send_push=True):
-    """Async task to notify target owner about replies milestone"""
+@shared_task
+def cleanup_expired_notifications_task():
+    """Async task to cleanup expired notifications"""
     try:
-        # Get target (post or comment)
-        target_content_type = ContentType.objects.get(model=target_type)
-        target = target_content_type.get_object_for_this_type(id=target_id)
+        now = timezone.now()
+        deleted_count = Notification.objects.filter(expires_at__lt=now).delete()[0]
 
-        from keyoconnect.posts.models import Post
-
-        if isinstance(target, Post):
-            result = AsyncNotificationService.notify_post_milestone(
-                target, "replies_milestone", count, send_push
-            )
-        else:
-            result = AsyncNotificationService.notify_comment_milestone(
-                target, "replies_milestone", count, send_push
-            )
-
-        return {"success": True, "notification_id": result.id if result else None}
+        logger.info(f"Cleaned up {deleted_count} expired notifications")
+        return {"success": True, "deleted_count": deleted_count}
     except Exception as exc:
-        logger.error(f"Replies milestone notification task failed: {str(exc)}")
+        logger.error(f"Cleanup expired notifications task failed: {str(exc)}")
+        return {"success": False, "error": str(exc)}
+
+
+# === BULK COMMUNITY NOTIFICATION TASKS ===
+
+
+@shared_task(bind=True, max_retries=2)
+def bulk_notify_community_members_task(
+    self, community_id, title, message, notification_type="system", send_push=False
+):
+    """Async task to send bulk notifications to all community members"""
+    try:
+        from keyopolls.notifications.fcm_services import FCMService
+
+        community = Community.objects.get(id=community_id)
+
+        result = FCMService.notify_community_members(
+            community=community,
+            title=title,
+            body=message,
+            notification_type=notification_type,
+            exclude_profile=None,
+        )
+
+        return {
+            "success": result["success"],
+            "message": result["message"],
+            "sent": result.get("sent", 0),
+            "total": result.get("total", 0),
+        }
+    except Exception as exc:
+        logger.error(f"Bulk community notification task failed: {str(exc)}")
         if self.request.retries < self.max_retries:
             raise self.retry(countdown=30, exc=exc)
         return {"success": False, "error": str(exc)}

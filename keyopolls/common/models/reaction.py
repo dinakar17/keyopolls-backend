@@ -5,8 +5,7 @@ from django.utils import timezone
 
 
 class Reaction(models.Model):
-    """Generic reactions for any content type -
-    supports all profile types: professional, public, pseudonymous, and anonymous"""
+    """Generic reactions for any content type - simplified for PseudonymousProfile"""
 
     # Currently supported reaction types
     REACTION_TYPES = (
@@ -20,17 +19,12 @@ class Reaction(models.Model):
         # ('angry', 'Angry'),
     )
 
-    # Profile type choices - updated for new auth system
-    PROFILE_TYPES = (
-        ("professional", "Professional"),
-        ("public", "Public"),
-        ("pseudonymous", "Pseudonymous"),
-        ("anonymous", "Anonymous"),
+    # Profile reference (direct foreign key)
+    profile = models.ForeignKey(
+        "profile.PseudonymousProfile",  # Replace with your app name
+        on_delete=models.CASCADE,
+        related_name="reactions",
     )
-
-    # Profile type and ID (instead of specific foreign keys)
-    profile_type = models.CharField(max_length=20, choices=PROFILE_TYPES)
-    profile_id = models.BigIntegerField()
 
     # Reaction type
     reaction_type = models.CharField(
@@ -51,8 +45,7 @@ class Reaction(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=[
-                    "profile_type",
-                    "profile_id",
+                    "profile",
                     "content_type",
                     "object_id",
                     "reaction_type",
@@ -63,7 +56,7 @@ class Reaction(models.Model):
 
         indexes = [
             models.Index(fields=["content_type", "object_id"]),
-            models.Index(fields=["profile_type", "profile_id", "-created_at"]),
+            models.Index(fields=["profile", "-created_at"]),
             models.Index(fields=["content_type", "object_id", "reaction_type"]),
             models.Index(fields=["reaction_type"]),
         ]
@@ -71,33 +64,30 @@ class Reaction(models.Model):
     def __str__(self):
         content_type_name = self.content_type.model
         return (
-            f"{self.reaction_type} by {self.profile_type} profile {self.profile_id} "
+            f"{self.reaction_type} by {self.profile.username} "
             f"on {content_type_name} {self.object_id}"
         )
 
     @classmethod
-    def get_user_reactions_by_profile_info(cls, profile_type, profile_id, content_obj):
+    def get_user_reactions_by_profile(cls, profile, content_obj):
         """
-        Get all reactions a profile has on a content object using profile type and ID.
-        This avoids circular imports by not importing profile models.
+        Get all reactions a profile has on a content object.
 
         Args:
-            profile_type: The type of profile ("professional", "public", etc.)
-            profile_id: The ID of the profile
-            content_obj: Any model instance (Post, Comment, CommunityPost, etc.)
+            profile: PseudonymousProfile instance
+            content_obj: Any model instance (Poll, Comment, etc.)
 
         Returns:
             dict: Dictionary of {reaction_type: bool} indicating user's reactions
         """
-        if not profile_type or not profile_id:
+        if not profile:
             return {r_type: False for r_type, _ in cls.REACTION_TYPES}
 
         content_type = ContentType.objects.get_for_model(content_obj)
 
         # Get all user reactions for this object
         user_reactions = cls.objects.filter(
-            profile_type=profile_type,
-            profile_id=profile_id,
+            profile=profile,
             content_type=content_type,
             object_id=content_obj.id,
         ).values_list("reaction_type", flat=True)
@@ -112,16 +102,16 @@ class Reaction(models.Model):
         return reaction_status
 
     @classmethod
-    def toggle_reaction(cls, public_profile, content_obj, reaction_type="like"):
+    def toggle_reaction(cls, profile, content_obj, reaction_type="like"):
         """
-        Toggle a reaction for any content object using public profile.
+        Toggle a reaction for any content object using pseudonymous profile.
         If the same reaction exists, it will be removed.
         If an opposite reaction exists, it will be switched.
         If no reaction exists, a new one will be created.
 
         Args:
-            public_profile: PublicProfile instance from authentication
-            content_obj: Any model instance (Post, Comment, CommunityPost, etc.)
+            profile: PseudonymousProfile instance from authentication
+            content_obj: Any model instance (Poll, Comment, etc.)
             reaction_type: The type of reaction ('like', 'dislike', etc.)
 
         Returns:
@@ -131,13 +121,10 @@ class Reaction(models.Model):
                 all reactions on this object
         """
         content_type = ContentType.objects.get_for_model(content_obj)
-        profile_type = "public"  # Always public for new auth system
-        profile_id = public_profile.id
 
         # Check if there's an existing reaction of the requested type
         existing_reaction = cls.objects.filter(
-            profile_type=profile_type,
-            profile_id=profile_id,
+            profile=profile,
             content_type=content_type,
             object_id=content_obj.id,
             reaction_type=reaction_type,
@@ -146,8 +133,7 @@ class Reaction(models.Model):
         # Get all other reactions from this profile on this object
         # (for potential switching)
         other_reactions = cls.objects.filter(
-            profile_type=profile_type,
-            profile_id=profile_id,
+            profile=profile,
             content_type=content_type,
             object_id=content_obj.id,
         ).exclude(id=existing_reaction.id if existing_reaction else None)
@@ -167,8 +153,7 @@ class Reaction(models.Model):
         else:
             # No existing reaction of this type, create a new one
             cls.objects.create(
-                profile_type=profile_type,
-                profile_id=profile_id,
+                profile=profile,
                 content_type=content_type,
                 object_id=content_obj.id,
                 reaction_type=reaction_type,
@@ -224,23 +209,21 @@ class Reaction(models.Model):
             content_obj.save(update_fields=updated_fields)
 
     @classmethod
-    def get_user_reactions(cls, public_profile, content_obj):
+    def get_user_reactions(cls, profile, content_obj):
         """
-        Get all reactions a public profile has on a content object.
+        Get all reactions a profile has on a content object.
 
         Args:
-            public_profile: PublicProfile instance from authentication (can be None)
-            content_obj: Any model instance (Post, Comment, CommunityPost, etc.)
+            profile: PseudonymousProfile instance from authentication (can be None)
+            content_obj: Any model instance (Poll, Comment, etc.)
 
         Returns:
             dict: Dictionary of {reaction_type: bool} indicating user's reactions
         """
-        if not public_profile:
+        if not profile:
             return {r_type: False for r_type, _ in cls.REACTION_TYPES}
 
-        return cls.get_user_reactions_by_profile_info(
-            "public", public_profile.id, content_obj
-        )
+        return cls.get_user_reactions_by_profile(profile, content_obj)
 
     @classmethod
     def get_reaction_counts(cls, content_obj):
@@ -248,7 +231,7 @@ class Reaction(models.Model):
         Get reaction counts for a content object.
 
         Args:
-            content_obj: Any model instance (Post, Comment, CommunityPost, etc.)
+            content_obj: Any model instance (Poll, Comment, etc.)
 
         Returns:
             dict: Dictionary of {reaction_type: count}
@@ -282,27 +265,25 @@ class Share(models.Model):
         ("other", "Other"),
     ]
 
-    # Updated profile type choices for new auth system
-    PROFILE_TYPE_CHOICES = [
-        ("professional", "Professional"),
-        ("public", "Public"),
-        ("pseudonymous", "Pseudonymous"),
-        ("anonymous", "Anonymous"),
-        ("unauthenticated", "Unauthenticated"),
-    ]
-
-    # Generic foreign key to any model (Post, CommunityPost, Article, etc.)
+    # Generic foreign key to any model (Poll, Comment, etc.)
     content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
     object_id = models.PositiveIntegerField()
     content_object = GenericForeignKey("content_type", "object_id")
 
-    # Profile information (instead of User FK)
-    profile_type = models.CharField(max_length=20, choices=PROFILE_TYPE_CHOICES)
-    profile_id = models.PositiveIntegerField()
+    # Profile reference (nullable for unauthenticated shares)
+    profile = models.ForeignKey(
+        "profile.PseudonymousProfile",
+        on_delete=models.CASCADE,
+        related_name="shares",
+        null=True,
+        blank=True,
+    )
 
     # Share details
     platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES)
     shared_at = models.DateTimeField(auto_now_add=True)
+
+    # For unauthenticated users
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     user_agent = models.TextField(blank=True)
     referrer = models.URLField(blank=True)
@@ -311,93 +292,137 @@ class Share(models.Model):
         ordering = ["-shared_at"]
         indexes = [
             models.Index(fields=["content_type", "object_id"]),
-            models.Index(fields=["profile_type", "profile_id"]),
+            models.Index(fields=["profile", "-shared_at"]),
             models.Index(fields=["platform", "shared_at"]),
+            # For unauthenticated users
+            models.Index(fields=["ip_address", "platform"]),
         ]
-        # Prevent duplicate shares from same profile for same content within short time
-        # For unauthenticated users, we use IP + User Agent to prevent duplicates
+        # Prevent duplicate shares
         constraints = [
+            # For authenticated users
             models.UniqueConstraint(
                 fields=[
                     "content_type",
                     "object_id",
-                    "profile_type",
-                    "profile_id",
+                    "profile",
                     "platform",
                 ],
-                condition=models.Q(
-                    profile_type__in=[
-                        "professional",
-                        "public",
-                        "pseudonymous",
-                        "anonymous",
-                    ]
-                ),
+                condition=models.Q(profile__isnull=False),
                 name="unique_share_per_authenticated_profile_platform",
             ),
+            # For unauthenticated users (IP-based)
             models.UniqueConstraint(
                 fields=["content_type", "object_id", "ip_address", "platform"],
-                condition=models.Q(profile_type="unauthenticated"),
+                condition=models.Q(profile__isnull=True),
                 name="unique_share_per_unauthenticated_user_platform",
             ),
         ]
 
     def __str__(self):
-        if self.profile_type == "unauthenticated":
+        if self.profile:
+            return (
+                f"{self.profile.username} shared "
+                f"{self.content_object} on {self.get_platform_display()}"
+            )
+        else:
             return (
                 f"Unauthenticated user ({self.ip_address}) shared "
                 f"{self.content_object} on {self.get_platform_display()}"
             )
-        return (
-            f"{self.profile_type} {self.profile_id} shared "
-            f"{self.content_object} on {self.get_platform_display()}"
-        )
 
     @classmethod
-    def increment_share_count(
-        cls, content_object, profile_type, profile_id, platform, **kwargs
-    ):
+    def increment_share_count(cls, content_object, profile, platform, **kwargs):
         """
         Create a share record and increment the content object's share_count
         Returns (share_instance, created)
 
-        Updated to work with new auth system where authenticated users are
-        always public profiles
+        Args:
+            content_object: The object being shared (Poll, Comment, etc.)
+            profile: PseudonymousProfile instance (None for unauthenticated users)
+            platform: Platform where content is being shared
+            **kwargs: Additional data like ip_address, user_agent, referrer
         """
         from django.db import transaction
 
         with transaction.atomic():
             # For unauthenticated users, use IP-based uniqueness
-            if profile_type == "unauthenticated":
+            if profile is None:
                 share, created = cls.objects.get_or_create(
                     content_type=ContentType.objects.get_for_model(content_object),
                     object_id=content_object.id,
-                    profile_type=profile_type,
+                    profile=None,
                     ip_address=kwargs.get("ip_address"),
                     platform=platform,
                     defaults={
-                        "profile_id": profile_id,
                         "user_agent": kwargs.get("user_agent", ""),
                         "referrer": kwargs.get("referrer", ""),
                     },
                 )
             else:
-                # For authenticated users (now always public profiles),
-                # use profile-based uniqueness
+                # For authenticated users, use profile-based uniqueness
                 share, created = cls.objects.get_or_create(
                     content_type=ContentType.objects.get_for_model(content_object),
                     object_id=content_object.id,
-                    profile_type=profile_type,
-                    profile_id=profile_id,
+                    profile=profile,
                     platform=platform,
                     defaults=kwargs,
                 )
 
             if created:
                 # Increment the share count on the content object
-                content_object.share_count = models.F("share_count") + 1
-                content_object.save(update_fields=["share_count"])
-                # Refresh to get the actual value
-                content_object.refresh_from_db(fields=["share_count"])
+                if hasattr(content_object, "share_count"):
+                    content_object.share_count = models.F("share_count") + 1
+                    content_object.save(update_fields=["share_count"])
+                    # Refresh to get the actual value
+                    content_object.refresh_from_db(fields=["share_count"])
 
             return share, created
+
+    @classmethod
+    def get_user_shares(cls, profile, content_obj):
+        """
+        Get all platforms a profile has shared a content object on.
+
+        Args:
+            profile: PseudonymousProfile instance (can be None)
+            content_obj: Any model instance (Poll, Comment, etc.)
+
+        Returns:
+            list: List of platforms the user has shared this content on
+        """
+        if not profile:
+            return []
+
+        content_type = ContentType.objects.get_for_model(content_obj)
+
+        return list(
+            cls.objects.filter(
+                profile=profile,
+                content_type=content_type,
+                object_id=content_obj.id,
+            ).values_list("platform", flat=True)
+        )
+
+    @classmethod
+    def get_share_counts_by_platform(cls, content_obj):
+        """
+        Get share counts by platform for a content object.
+
+        Args:
+            content_obj: Any model instance (Poll, Comment, etc.)
+
+        Returns:
+            dict: Dictionary of {platform: count}
+        """
+        content_type = ContentType.objects.get_for_model(content_obj)
+
+        share_counts = {}
+        for platform_key, platform_name in cls.PLATFORM_CHOICES:
+            count = cls.objects.filter(
+                content_type=content_type,
+                object_id=content_obj.id,
+                platform=platform_key,
+            ).count()
+            share_counts[platform_key] = count
+
+        return share_counts

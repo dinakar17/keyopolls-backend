@@ -1,27 +1,30 @@
 import logging
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from django.contrib.contenttypes.models import ContentType
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.http import HttpRequest
-from keyoconnect.comments.api import (
+from ninja import Field, Router, Schema
+from shared.schemas import Message
+
+from keyopolls.comments.api import (
     CommentSortEnum,
     get_page_or_fallback,
     get_top_level_comment_id,
     validate_pagination_params,
 )
-from keyoconnect.comments.models import GenericComment
-from keyoconnect.common.models import Reaction
-from keyoconnect.common.schemas import ContentTypeEnum, LinkSchema, MediaSchema
-from keyoconnect.posts.models import Post
-from keyoconnect.profiles.middleware import OptionalPublicJWTAuth
-from keyoconnect.profiles.models import PublicProfile
-from keyoconnect.profiles.schemas import AuthorSchema, ProfileType
-from keyoconnect.utils import get_author_info, get_content_object
-from ninja import Field, Router, Schema
-from shared.schemas import Message
+from keyopolls.comments.models import GenericComment
+from keyopolls.common.models import Reaction
+from keyopolls.common.schemas import ContentTypeEnum
+from keyopolls.polls.models import Poll
+from keyopolls.profile.middleware import (
+    OptionalPseudonymousJWTAuth,
+    PseudonymousProfile,
+)
+from keyopolls.profile.schemas import AuthorSchema
+from keyopolls.utils import get_author_info, get_content_object
 
 logger = logging.getLogger(__name__)
 
@@ -38,15 +41,16 @@ class CommentSearchTypeEnum(str, Enum):
     LINKS = "links"
 
 
-class PostContentSchema(Schema):
-    """Schema for post content when included in comment search results"""
+class PollContentSchema(Schema):
+    """Schema for poll content when included in comment search results"""
 
     id: int
-    profile_type: ProfileType
-    content: str
+    title: str
+    description: str
+    poll_type: str
     author_info: AuthorSchema
-    media: List[MediaSchema] = []
-    links: List[LinkSchema] = []
+    total_votes: int
+    option_count: int
 
 
 class CommentSearchResultOut(Schema):
@@ -55,7 +59,6 @@ class CommentSearchResultOut(Schema):
     # Core comment fields
     id: int
     content: str
-    profile_type: str
     created_at: str
     updated_at: str
     is_edited: bool
@@ -86,8 +89,8 @@ class CommentSearchResultOut(Schema):
     search_snippet: str = Field(default="")  # Highlighted snippet
     relevance_score: float = Field(default=0.0)
 
-    # Optional post content
-    post_content: Optional[PostContentSchema] = None
+    # Optional poll content
+    poll_content: Optional[PollContentSchema] = None
 
 
 class PaginatedCommentSearchResponse(Schema):
@@ -103,14 +106,14 @@ class PaginatedCommentSearchResponse(Schema):
     search_query: Optional[str] = None
     search_type: Optional[str] = None
     profile_filter: Optional[dict] = None
-    include_post_content: bool = Field(default=False)
+    include_poll_content: bool = Field(default=False)
     total_time_ms: int
 
 
 @router.get(
     "/comments/search",
     response={200: PaginatedCommentSearchResponse, 400: Message},
-    auth=OptionalPublicJWTAuth,
+    auth=OptionalPseudonymousJWTAuth,
 )
 def search_comments(
     request: HttpRequest,
@@ -119,8 +122,7 @@ def search_comments(
     content_type: Optional[ContentTypeEnum] = None,  # Filter by content type
     object_id: Optional[int] = None,  # Filter by specific object
     profile_id: Optional[int] = None,  # Filter by profile ID
-    profile_type: Optional[str] = None,  # Filter by profile type (public/anonymous)
-    include_post_content: bool = False,  # Include post content in response
+    include_poll_content: bool = False,  # Include poll content in response
     page: int = 1,
     page_size: int = 20,
     sort: CommentSortEnum = CommentSortEnum.NEWEST,
@@ -131,11 +133,10 @@ def search_comments(
     Args:
         q: Search query string (optional)
         search_type: Type of search (all, content, author, media, links)
-        content_type: Optional filter by content type (post, article, etc.)
+        content_type: Optional filter by content type (poll, etc.)
         object_id: Optional filter by specific content object
-        profile_id: Optional filter by profile ID
-        profile_type: Optional filter by profile type (public/anonymous)
-        include_post_content: Whether to include post content in response
+        profile_id: Optional filter by profile ID (PseudonymousProfile ID)
+        include_poll_content: Whether to include poll content in response
         page: Page number
         page_size: Results per page (max 100)
         sort: Sort order for results
@@ -144,24 +145,17 @@ def search_comments(
 
     start_time = time.time()
 
-    # Extract authentication info from OptionalPublicJWTAuth
-    public_profile = request.auth if request.auth else None
-
-    # Create auth data with public profile context
-    auth_data = {"profiles": {"public": public_profile}} if public_profile else {}
+    # Extract authentication info from OptionalPseudonymousJWTAuth
+    profile = request.auth if request.auth else None
 
     # Validate parameters
     if q and len(q.strip()) < 2:
         return 400, {"message": "Search query must be at least 2 characters long"}
 
-    if profile_id and profile_type not in ["public", "anonymous"]:
-        return 400, {"message": "Invalid profile_type. Must be 'public' or 'anonymous'"}
-
     if not q and not profile_id:
         return 400, {
             "message": (
-                "Either search query (q) or profile filter "
-                "(profile_id + profile_type) is required"
+                "Either search query (q) or profile filter (profile_id) is required"
             )
         }
 
@@ -170,37 +164,21 @@ def search_comments(
         return 400, {"message": validation_error}
 
     try:
-        # Build the base query - only public and anonymous profiles
+        # Build the base query - only approved comments
         base_query = GenericComment.objects.filter(
             is_taken_down=False,
             is_deleted=False,
             moderation_status="approved",
-            profile_type__in=["public", "anonymous"],
         )
 
         # Apply profile filter if specified
-        if profile_id and profile_type:
-            # Handle profile filtering based on the simplified approach
-            if profile_type == "public":
-                base_query = base_query.filter(
-                    profile_type="public", profile_id=profile_id
-                )
-            elif profile_type == "anonymous":
-                # For anonymous comments, we need to find comments where the profile_id
-                # matches the anonymous profile that belongs to the given public
-                #  profile ID
-                try:
-                    public_profile_obj = PublicProfile.objects.get(id=profile_id)
-                    if public_profile_obj.anonymous_profile:
-                        base_query = base_query.filter(
-                            profile_type="anonymous",
-                            profile_id=public_profile_obj.anonymous_profile.id,
-                        )
-                    else:
-                        # No anonymous profile exists, return empty results
-                        base_query = base_query.none()
-                except PublicProfile.DoesNotExist:
-                    base_query = base_query.none()
+        if profile_id:
+            try:
+                profile_obj = PseudonymousProfile.objects.get(id=profile_id)
+                base_query = base_query.filter(profile=profile_obj)
+            except PseudonymousProfile.DoesNotExist:
+                # No profile exists, return empty results
+                base_query = base_query.none()
 
         # Apply content filters if specified
         if content_type and object_id:
@@ -246,7 +224,7 @@ def search_comments(
         search_results = []
         for comment in comments_page:
             result = convert_comment_to_search_result(
-                comment, q or "", auth_data, include_post_content
+                comment, q or "", profile, include_poll_content
             )
             search_results.append(result)
 
@@ -263,7 +241,7 @@ def search_comments(
             "page_size": page_size,
             "has_next": comments_page.has_next(),
             "has_previous": comments_page.has_previous(),
-            "include_post_content": include_post_content,
+            "include_poll_content": include_poll_content,
             "total_time_ms": total_time_ms,
         }
 
@@ -273,10 +251,9 @@ def search_comments(
             response_data["search_type"] = search_type.value
 
         # Add profile filter info if profile filter was used
-        if profile_id and profile_type:
+        if profile_id:
             response_data["profile_filter"] = {
                 "profile_id": profile_id,
-                "profile_type": profile_type,
             }
 
         return 200, PaginatedCommentSearchResponse(**response_data)
@@ -289,43 +266,28 @@ def search_comments(
 def convert_comment_to_search_result(
     comment: GenericComment,
     search_query: str,
-    auth_data: Dict[str, Any],
-    include_post_content: bool = False,
+    auth_profile,
+    include_poll_content: bool = False,
 ) -> CommentSearchResultOut:
     """Convert a comment to search result format"""
 
-    # Get author info using our utility function
-    author_info = get_author_info(
-        profile_id=comment.profile_id,
-        profile_type=comment.profile_type,
-        anonymous_identifier=comment.anonymous_comment_identifier,
-    )
+    # Get author info using the simplified function
+    author_info = get_author_info(comment.profile)
 
     # Check user engagement with simplified logic
     has_user_liked = False
     is_author = False
 
-    public_profile = auth_data.get("profiles", {}).get("public")
-    if public_profile:
+    if auth_profile:
         # Check if user is author
-        if comment.profile_type == "public":
-            is_author = comment.profile_id == public_profile.id
-        elif comment.profile_type == "anonymous":
-            try:
-                is_author = (
-                    public_profile.anonymous_profile
-                    and comment.profile_id == public_profile.anonymous_profile.id
-                )
-            except AttributeError:
-                is_author = False
+        is_author = comment.profile.id == auth_profile.id
 
-        # Check if user liked this comment (always use public profile for reactions)
+        # Check if user liked this comment
         try:
-            user_reactions = Reaction.get_user_reactions_by_profile_info(
-                "public", public_profile.id, comment
+            user_reactions = Reaction.get_user_reactions_by_profile(
+                auth_profile, comment
             )
-            if user_reactions.get("like", False):
-                has_user_liked = True
+            has_user_liked = user_reactions.get("like", False)
         except Exception:
             pass
 
@@ -347,7 +309,7 @@ def convert_comment_to_search_result(
         link_obj = comment.links.first()
         if link_obj:
             has_link = True
-            link_domain = link_obj.domain
+            link_domain = getattr(link_obj, "domain", None)
     except Exception:
         pass
 
@@ -357,15 +319,14 @@ def convert_comment_to_search_result(
     # Get relevance score if available
     relevance_score = getattr(comment, "relevance_score", 0.0)
 
-    # Get post content if requested
-    post_content = None
-    if include_post_content:
-        post_content = get_post_content(comment)
+    # Get poll content if requested
+    poll_content = None
+    if include_poll_content:
+        poll_content = get_poll_content(comment)
 
     return CommentSearchResultOut(
         id=comment.id,
         content=comment.content,
-        profile_type=comment.profile_type,
         created_at=comment.created_at.isoformat(),
         updated_at=comment.updated_at.isoformat(),
         is_edited=comment.is_edited,
@@ -385,90 +346,41 @@ def convert_comment_to_search_result(
         link_domain=link_domain,
         search_snippet=search_snippet,
         relevance_score=relevance_score,
-        post_content=post_content,
+        poll_content=poll_content,
     )
 
 
-def get_post_content(comment: GenericComment) -> Optional[PostContentSchema]:
-    """Extract post content if the comment is on a post"""
+def get_poll_content(comment: GenericComment) -> Optional[PollContentSchema]:
+    """Extract poll content if the comment is on a poll"""
     try:
-        # Check if the comment is on a post
-        if comment.content_type.model != "post":
+        # Check if the comment is on a poll
+        if comment.content_type.model != "poll":
             return None
 
         try:
-            post = Post.objects.get(id=comment.object_id, is_deleted=False)
-        except Post.DoesNotExist:
+            poll = Poll.objects.get(id=comment.object_id, is_deleted=False)
+        except Poll.DoesNotExist:
             logger.warning(
-                f"Post {comment.object_id} for comment {comment.id} "
+                f"Poll {comment.object_id} for comment {comment.id} "
                 f"does not exist or is deleted"
             )
             return None
 
-        # Validate profile type - only public and anonymous are supported
-        if post.profile_type not in ["public", "anonymous"]:
-            logger.warning(
-                f"Unsupported profile type '{post.profile_type}' for post {post.id}"
-            )
-            return None
+        # Get poll author info using the simplified function
+        poll_author_info = get_author_info(poll.profile)
 
-        # Get post author info using the same pattern as PostSchema.resolve_post
-        try:
-            # Get the profile object from the post
-            author_profile = post.get_profile()
-            profile_id = author_profile.id if author_profile else None
-
-            # For anonymous posts, pass the anonymous identifier
-            anonymous_identifier = None
-            if post.profile_type == "anonymous":
-                anonymous_identifier = post.anonymous_post_identifier
-
-            post_author_info = get_author_info(
-                profile_id=profile_id,
-                profile_type=post.profile_type,
-                anonymous_identifier=anonymous_identifier,
-            )
-        except Exception as e:
-            logger.error(f"Error getting author info for post {post.id}: {str(e)}")
-            # Return a default author info structure that matches AuthorSchema
-            post_author_info = {
-                "id": None,
-                "display_name": "Unknown User",
-                "handle": None,
-                "avatar_url": None,
-                "is_verified": False,
-                "profile_type": post.profile_type,
-            }
-
-        # Get post media using the same pattern as PostSchema.resolve_post
-        media_data = []
-        try:
-            # Use the property method just like PostSchema does
-            media_data = [media.to_dict() for media in post.media.all()]
-        except Exception as e:
-            logger.error(f"Error processing media for post {post.id}: {str(e)}")
-            media_data = []
-
-        # Get post links using the same pattern as PostSchema.resolve_post
-        links_data = []
-        try:
-            # Use the property method just like PostSchema does
-            links_data = [link.to_dict() for link in post.links.all()]
-        except Exception as e:
-            logger.error(f"Error processing links for post {post.id}: {str(e)}")
-            links_data = []
-
-        return PostContentSchema(
-            id=post.id,
-            profile_type=post.profile_type,
-            content=post.content,
-            author_info=post_author_info,
-            media=media_data,
-            links=links_data,
+        return PollContentSchema(
+            id=poll.id,
+            title=poll.title,
+            description=poll.description,
+            poll_type=poll.poll_type,
+            author_info=poll_author_info,
+            total_votes=poll.total_votes,
+            option_count=poll.option_count,
         )
 
     except Exception as e:
-        logger.error(f"Error getting post content for comment {comment.id}: {str(e)}")
+        logger.error(f"Error getting poll content for comment {comment.id}: {str(e)}")
         return None
 
 
@@ -482,19 +394,15 @@ def build_search_query(query: str, search_type: CommentSearchTypeEnum) -> Q:
 
     elif search_type == CommentSearchTypeEnum.AUTHOR:
         # Search in author information using profile data
-        # Only search public and anonymous profiles
         author_query = Q()
 
-        # Public profiles
-        author_query |= Q(
-            profile_type="public",
-            profile_id__in=get_matching_profile_ids("public", query_lower),
-        )
+        # Search by profile username and display_name
+        matching_profile_ids = get_matching_profile_ids(query_lower)
+        if matching_profile_ids:
+            author_query |= Q(profile_id__in=matching_profile_ids)
 
-        # Anonymous profiles - search by anonymous_comment_identifier
-        author_query |= Q(
-            profile_type="anonymous", anonymous_comment_identifier__icontains=query
-        )
+        # Search by anonymous_comment_identifier
+        author_query |= Q(anonymous_comment_identifier__icontains=query)
 
         return author_query
 
@@ -528,26 +436,17 @@ def build_search_query(query: str, search_type: CommentSearchTypeEnum) -> Q:
         return content_query | media_query | link_query | author_query
 
 
-def get_matching_profile_ids(profile_type: str, query: str) -> List[int]:
-    """Get profile IDs that match the search query for a specific profile type"""
+def get_matching_profile_ids(query: str) -> List[int]:
+    """Get profile IDs that match the search query"""
     try:
-        if profile_type == "public":
-            matching_profiles = PublicProfile.objects.filter(
-                Q(display_name__icontains=query) | Q(handle__icontains=query)
-            ).values_list("id", flat=True)
-
-        elif profile_type == "anonymous":
-            # For anonymous profiles, we'll search by anonymous_comment_identifier
-            # directly in the comment query, so return empty list here
-            return []
-
-        else:
-            return []
+        matching_profiles = PseudonymousProfile.objects.filter(
+            Q(display_name__icontains=query) | Q(username__icontains=query)
+        ).values_list("id", flat=True)
 
         return list(matching_profiles)
 
     except Exception as e:
-        logger.error(f"Error getting matching profile IDs for {profile_type}: {str(e)}")
+        logger.error(f"Error getting matching profile IDs: {str(e)}")
         return []
 
 

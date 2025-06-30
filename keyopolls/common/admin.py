@@ -1,5 +1,6 @@
 from django.contrib import admin
-from keyoconnect.common.models import Category, SubCategory
+
+from keyopolls.common.models import Category, SubCategory
 
 
 class SubCategoryInline(admin.TabularInline):

@@ -2,18 +2,15 @@ from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
 from django.utils import timezone
-from keyoconnect.common.models.bookmark import Bookmark, BookmarkFolder
-from keyoconnect.common.models.follow import Block, Follow, FollowRequest
-from keyoconnect.common.models.impressions import Impression, ImpressionTrackingMixin
-from keyoconnect.common.models.media import Link, Media, UploadedImage
-from keyoconnect.common.models.reaction import Reaction, Share
+
+from keyopolls.common.models.bookmark import Bookmark, BookmarkFolder
+from keyopolls.common.models.impressions import Impression, ImpressionTrackingMixin
+from keyopolls.common.models.media import Link, Media, UploadedImage
+from keyopolls.common.models.reaction import Reaction, Share
 
 __all__ = [
     "Bookmark",
     "BookmarkFolder",
-    "Follow",
-    "FollowRequest",
-    "Block",
     "Media",
     "Link",
     "Reaction",

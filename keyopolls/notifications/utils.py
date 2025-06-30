@@ -1,38 +1,39 @@
 """
-Notification utilities for easy integration across the application.
+Notification utilities for easy integration across the poll application.
 
 This module provides simple functions that automatically handle both synchronous
 and asynchronous notification delivery based on your application's configuration.
 
 Usage Examples:
     # Basic usage (async by default)
-    from keyoconnect.connect_notifications.utils import notify_post_comment
-    notify_post_comment(post, comment, actor)
+    from keyopolls.notifications.utils import notify_poll_comment
+    notify_poll_comment(poll, comment, actor)
 
     # Force synchronous execution
-    notify_post_comment(post, comment, actor, use_async=False)
+    notify_poll_comment(poll, comment, actor, use_async=False)
 
     # Disable push notifications
-    notify_post_comment(post, comment, actor, send_push=False)
+    notify_poll_comment(poll, comment, actor, send_push=False)
 """
 
 from django.conf import settings
-from keyoconnect.connect_notifications.models import NotificationType
-from keyoconnect.connect_notifications.services import AsyncNotificationService
+
+from keyopolls.notifications.models import NotificationType
+from keyopolls.notifications.services import AsyncNotificationService
 
 # Global setting to enable/disable async notifications
-USE_ASYNC_NOTIFICATIONS = settings.USE_ASYNC_NOTIFICATIONS
+USE_ASYNC_NOTIFICATIONS = getattr(settings, "USE_ASYNC_NOTIFICATIONS", True)
 
 
-# === POST OWNER NOTIFICATIONS ===
+# === POLL OWNER NOTIFICATIONS ===
 
 
-def notify_post_comment(post, comment, actor, send_push=True, use_async=None):
+def notify_poll_comment(poll, comment, actor, send_push=True, use_async=None):
     """
-    Notify post owner when someone comments on their post.
+    Notify poll owner when someone comments on their poll.
 
     Args:
-        post: The post that was commented on
+        poll: The poll that was commented on
         comment: The new comment
         actor: The user who made the comment
         send_push: Whether to send push notification
@@ -44,18 +45,40 @@ def notify_post_comment(post, comment, actor, send_push=True, use_async=None):
     if use_async is None:
         use_async = USE_ASYNC_NOTIFICATIONS
 
-    return AsyncNotificationService.notify_post_comment(
-        post, comment, actor, send_push, use_async
+    return AsyncNotificationService.notify_poll_comment(
+        poll, comment, actor, send_push, use_async
     )
 
 
-def notify_post_milestone(post, milestone_type, count, send_push=True, use_async=None):
+def notify_poll_vote(poll, voter, option, send_push=True, use_async=None):
     """
-    Notify post owner when their post reaches a milestone.
+    Notify poll owner when someone votes on their poll.
 
     Args:
-        post: The post that reached the milestone
-        milestone_type: Type of milestone (likes, shares, etc.)
+        poll: The poll that was voted on
+        voter: The user who voted
+        option: The poll option that was selected
+        send_push: Whether to send push notification
+        use_async: Override global async setting (None uses global setting)
+
+    Returns:
+        Celery task result if async, Notification object if sync
+    """
+    if use_async is None:
+        use_async = USE_ASYNC_NOTIFICATIONS
+
+    return AsyncNotificationService.notify_poll_vote(
+        poll, voter, option, send_push, use_async
+    )
+
+
+def notify_poll_milestone(poll, milestone_type, count, send_push=True, use_async=None):
+    """
+    Notify poll owner when their poll reaches a milestone.
+
+    Args:
+        poll: The poll that reached the milestone
+        milestone_type: Type of milestone (votes, likes, shares, etc.)
         count: The milestone count reached
         send_push: Whether to send push notification
         use_async: Override global async setting (None uses global setting)
@@ -66,8 +89,8 @@ def notify_post_milestone(post, milestone_type, count, send_push=True, use_async
     if use_async is None:
         use_async = USE_ASYNC_NOTIFICATIONS
 
-    return AsyncNotificationService.notify_post_milestone(
-        post, milestone_type, count, send_push, use_async
+    return AsyncNotificationService.notify_poll_milestone(
+        poll, milestone_type, count, send_push, use_async
     )
 
 
@@ -104,7 +127,7 @@ def notify_comment_milestone(
 
     Args:
         comment: The comment that reached the milestone
-        milestone_type: Type of milestone (usually likes)
+        milestone_type: Type of milestone (usually likes or replies)
         count: The milestone count reached
         send_push: Whether to send push notification
         use_async: Override global async setting (None uses global setting)
@@ -167,12 +190,12 @@ def notify_follower_milestone(user, count, send_push=True, use_async=None):
 
 def notify_mention(mentioned_user, actor, target, send_push=True, use_async=None):
     """
-    Notify user when they are mentioned in a post or comment.
+    Notify user when they are mentioned in a poll or comment.
 
     Args:
         mentioned_user: The user who was mentioned
         actor: The user who made the mention
-        target: The post or comment containing the mention
+        target: The poll or comment containing the mention
         send_push: Whether to send push notification
         use_async: Override global async setting (None uses global setting)
 
@@ -187,15 +210,16 @@ def notify_mention(mentioned_user, actor, target, send_push=True, use_async=None
     )
 
 
-# === FOLLOW-BASED NOTIFICATIONS ===
+# === COMMUNITY NOTIFICATIONS ===
 
 
-def notify_followed_user_post(post, send_push=False, use_async=None):
+def notify_community_new_poll(community, poll, send_push=False, use_async=None):
     """
-    Notify all followers when someone they follow creates a new post.
+    Notify community members when a new poll is created.
 
     Args:
-        post: The new post
+        community: The community where the poll was created
+        poll: The new poll
         send_push: Whether to send push notifications (default False for feeds)
         use_async: Override global async setting (None uses global setting)
 
@@ -205,17 +229,64 @@ def notify_followed_user_post(post, send_push=False, use_async=None):
     if use_async is None:
         use_async = USE_ASYNC_NOTIFICATIONS
 
-    return AsyncNotificationService.notify_followed_user_post(
-        post, send_push, use_async
+    return AsyncNotificationService.notify_community_new_poll(
+        community, poll, send_push, use_async
     )
 
 
-def notify_followed_post_comment(post, comment, actor, send_push=False, use_async=None):
+def notify_community_invite(
+    community, inviter, invitee, send_push=True, use_async=None
+):
     """
-    Notify users who follow a post when someone comments on it.
+    Notify user when they are invited to join a community.
 
     Args:
-        post: The post that was commented on
+        community: The community they were invited to
+        inviter: The user who sent the invitation
+        invitee: The user who was invited
+        send_push: Whether to send push notification
+        use_async: Override global async setting (None uses global setting)
+
+    Returns:
+        Celery task result if async, Notification object if sync
+    """
+    if use_async is None:
+        use_async = USE_ASYNC_NOTIFICATIONS
+
+    return AsyncNotificationService.notify_community_invite(
+        community, inviter, invitee, send_push, use_async
+    )
+
+
+# === FOLLOW-BASED NOTIFICATIONS ===
+
+
+def notify_followed_user_poll(poll, send_push=False, use_async=None):
+    """
+    Notify all followers when someone they follow creates a new poll.
+
+    Args:
+        poll: The new poll
+        send_push: Whether to send push notifications (default False for feeds)
+        use_async: Override global async setting (None uses global setting)
+
+    Returns:
+        Celery task result if async, list of Notification objects if sync
+    """
+    if use_async is None:
+        use_async = USE_ASYNC_NOTIFICATIONS
+
+    return AsyncNotificationService.notify_followed_user_poll(
+        poll, send_push, use_async
+    )
+
+
+def notify_followed_poll_comment(poll, comment, actor, send_push=False, use_async=None):
+    """
+    Notify users who follow a poll when someone comments on it.
+
+    Args:
+        poll: The poll that was commented on
         comment: The new comment
         actor: The user who made the comment
         send_push: Whether to send push notifications (default False for feeds)
@@ -227,8 +298,8 @@ def notify_followed_post_comment(post, comment, actor, send_push=False, use_asyn
     if use_async is None:
         use_async = USE_ASYNC_NOTIFICATIONS
 
-    return AsyncNotificationService.notify_followed_post_comment(
-        post, comment, actor, send_push, use_async
+    return AsyncNotificationService.notify_followed_poll_comment(
+        poll, comment, actor, send_push, use_async
     )
 
 
@@ -259,24 +330,24 @@ def notify_followed_comment_reply(
 # === AUTO-FOLLOW UTILITIES ===
 
 
-def auto_follow_post(user, post, interaction_type="comment", use_async=None):
+def auto_follow_poll(user, poll, interaction_type="comment", use_async=None):
     """
-    Automatically follow a post when user interacts with it.
+    Automatically follow a poll when user interacts with it.
 
     Args:
-        user: The user who interacted with the post
-        post: The post that was interacted with
-        interaction_type: Type of interaction (comment, like, etc.)
+        user: The user who interacted with the poll
+        poll: The poll that was interacted with
+        interaction_type: Type of interaction (comment, vote, etc.)
         use_async: Override global async setting (None uses global setting)
 
     Returns:
-        Celery task result if async, PostFollow object if sync
+        Celery task result if async, PollFollow object if sync
     """
     if use_async is None:
         use_async = USE_ASYNC_NOTIFICATIONS
 
-    return AsyncNotificationService.auto_follow_post(
-        user, post, interaction_type, use_async
+    return AsyncNotificationService.auto_follow_poll(
+        user, poll, interaction_type, use_async
     )
 
 
@@ -298,18 +369,18 @@ def auto_follow_comment(user, comment, use_async=None):
     return AsyncNotificationService.auto_follow_comment(user, comment, use_async)
 
 
-def unfollow_post(user, post):
+def unfollow_poll(user, poll):
     """
-    Unfollow a post (always synchronous).
+    Unfollow a poll (always synchronous).
 
     Args:
         user: The user who wants to unfollow
-        post: The post to unfollow
+        poll: The poll to unfollow
 
     Returns:
         bool: True if unfollowed successfully, False if not following
     """
-    return AsyncNotificationService.unfollow_post(user, post)
+    return AsyncNotificationService.unfollow_poll(user, poll)
 
 
 def unfollow_comment(user, comment):
@@ -324,6 +395,81 @@ def unfollow_comment(user, comment):
         bool: True if unfollowed successfully, False if not following
     """
     return AsyncNotificationService.unfollow_comment(user, comment)
+
+
+# === MILESTONE UTILITIES ===
+
+
+def notify_replies_milestone(target, count, send_push=True, use_async=None):
+    """
+    Notify target owner (poll or comment) when they reach a replies milestone.
+
+    Args:
+        target: The poll or comment that reached the replies milestone
+        count: The replies count reached
+        send_push: Whether to send push notification
+        use_async: Override global async setting (None uses global setting)
+
+    Returns:
+        Celery task result if async, Notification object if sync
+    """
+    if use_async is None:
+        use_async = USE_ASYNC_NOTIFICATIONS
+
+    # Determine if it's a poll or comment milestone
+    from keyopolls.polls.models import Poll
+
+    if isinstance(target, Poll):
+        return AsyncNotificationService.notify_poll_milestone(
+            target, NotificationType.REPLIES_MILESTONE, count, send_push, use_async
+        )
+    else:
+        # It's a comment
+        return AsyncNotificationService.notify_comment_milestone(
+            target, NotificationType.REPLIES_MILESTONE, count, send_push, use_async
+        )
+
+
+def notify_vote_milestone(poll, count, send_push=True, use_async=None):
+    """
+    Notify poll owner when their poll reaches a vote milestone.
+
+    Args:
+        poll: The poll that reached the vote milestone
+        count: The vote count reached
+        send_push: Whether to send push notification
+        use_async: Override global async setting (None uses global setting)
+
+    Returns:
+        Celery task result if async, Notification object if sync
+    """
+    if use_async is None:
+        use_async = USE_ASYNC_NOTIFICATIONS
+
+    return AsyncNotificationService.notify_poll_milestone(
+        poll, NotificationType.VOTE_MILESTONE, count, send_push, use_async
+    )
+
+
+def notify_view_milestone(poll, count, send_push=True, use_async=None):
+    """
+    Notify poll owner when their poll reaches a view milestone.
+
+    Args:
+        poll: The poll that reached the view milestone
+        count: The view count reached
+        send_push: Whether to send push notification
+        use_async: Override global async setting (None uses global setting)
+
+    Returns:
+        Celery task result if async, Notification object if sync
+    """
+    if use_async is None:
+        use_async = USE_ASYNC_NOTIFICATIONS
+
+    return AsyncNotificationService.notify_poll_milestone(
+        poll, NotificationType.VIEW_MILESTONE, count, send_push, use_async
+    )
 
 
 # === BATCH OPERATIONS ===
@@ -345,17 +491,17 @@ def send_notification_batch(notifications_data, send_push=True, send_email=True)
         notifications_data = [
             {
                 'recipient': user1,
-                'notification_type': 'comment',
+                'notification_type': 'poll_comment',
                 'title': 'New Comment',
-                'message': 'Someone commented on your post',
+                'message': 'Someone commented on your poll',
                 'actor': commenter,
-                'target': post
+                'target': poll
             },
             # ... more notifications
         ]
         send_notification_batch(notifications_data)
     """
-    from keyoconnect.connect_notifications.tasks import batch_send_notifications_task
+    from keyopolls.notifications.tasks import batch_send_notifications_task
 
     # Create notifications first
     notification_ids = []
@@ -385,7 +531,7 @@ def cleanup_old_notifications(days_old=30):
     Returns:
         Celery task result
     """
-    from keyoconnect.connect_notifications.tasks import cleanup_old_notifications_task
+    from keyopolls.notifications.tasks import cleanup_old_notifications_task
 
     return cleanup_old_notifications_task.delay(days_old)
 
@@ -435,12 +581,10 @@ def update_notification_preferences(
     Returns:
         NotificationPreference object
     """
-    from django.contrib.contenttypes.models import ContentType
-    from keyoconnect.connect_notifications.models import NotificationPreference
+    from keyopolls.notifications.models import NotificationPreference
 
     preference, created = NotificationPreference.objects.update_or_create(
-        profile_content_type=ContentType.objects.get_for_model(user),
-        profile_object_id=user.id,
+        profile=user,
         notification_type=notification_type,
         defaults={
             "is_enabled": enabled,
@@ -464,13 +608,9 @@ def get_notification_preferences(user, notification_type=None):
     Returns:
         QuerySet of NotificationPreference objects
     """
-    from django.contrib.contenttypes.models import ContentType
-    from keyoconnect.connect_notifications.models import NotificationPreference
+    from keyopolls.notifications.models import NotificationPreference
 
-    queryset = NotificationPreference.objects.filter(
-        profile_content_type=ContentType.objects.get_for_model(user),
-        profile_object_id=user.id,
-    )
+    queryset = NotificationPreference.objects.filter(profile=user)
 
     if notification_type:
         queryset = queryset.filter(notification_type=notification_type)
@@ -478,13 +618,20 @@ def get_notification_preferences(user, notification_type=None):
     return queryset
 
 
-def notify_replies_milestone(target, count, send_push=True, use_async=None):
+# === COMMUNITY UTILITIES ===
+
+
+def notify_community_role_change(
+    community, member, new_role, changed_by, send_push=True, use_async=None
+):
     """
-    Notify target owner (post or comment) when they reach a replies milestone.
+    Notify user when their role in a community changes.
 
     Args:
-        target: The post or comment that reached the replies milestone
-        count: The replies count reached
+        community: The community where the role changed
+        member: The user whose role changed
+        new_role: The new role assigned
+        changed_by: The user who changed the role
         send_push: Whether to send push notification
         use_async: Override global async setting (None uses global setting)
 
@@ -494,18 +641,27 @@ def notify_replies_milestone(target, count, send_push=True, use_async=None):
     if use_async is None:
         use_async = USE_ASYNC_NOTIFICATIONS
 
-    # Determine if it's a post or comment milestone
-    from keyoconnect.posts.models import Post
+    from keyopolls.notifications.utils import URLBuilder
 
-    if isinstance(target, Post):
-        return AsyncNotificationService.notify_post_milestone(
-            target, NotificationType.REPLIES_MILESTONE, count, send_push, use_async
-        )
-    else:
-        # It's a comment
-        return AsyncNotificationService.notify_comment_milestone(
-            target, NotificationType.REPLIES_MILESTONE, count, send_push, use_async
-        )
+    click_url = URLBuilder.build_community_url(community.id)
+    deep_link_data = URLBuilder.build_deep_link_data(
+        "community", {"community_id": community.id}
+    )
+
+    return AsyncNotificationService.send_notification(
+        recipient=member,
+        notification_type=NotificationType.COMMUNITY_ROLE_CHANGE,
+        title="Role Updated",
+        message=f"Your role in {community.name} has been changed to {new_role}",
+        actor=changed_by,
+        target=community,
+        click_url=click_url,
+        deep_link_data=deep_link_data,
+        extra_data={"new_role": new_role, "community_name": community.name},
+        # priority=NotificationPriority.HIGH,
+        send_push=send_push,
+        use_async=use_async,
+    )
 
 
 # === DEBUGGING UTILITIES ===
@@ -522,7 +678,8 @@ def get_notification_stats():
 
     from django.db.models import Count
     from django.utils import timezone
-    from keyoconnect.connect_notifications.models import Notification
+
+    from keyopolls.notifications.models import Notification
 
     now = timezone.now()
     last_24h = now - timedelta(hours=24)
@@ -554,7 +711,7 @@ def get_notification_stats():
     return stats
 
 
-def test_notification_delivery(user, notification_type="test"):
+def test_notification_delivery(user, notification_type="system"):
     """
     Send a test notification to verify delivery is working.
 
@@ -574,3 +731,121 @@ def test_notification_delivery(user, notification_type="test"):
         send_email=True,
         use_async=USE_ASYNC_NOTIFICATIONS,
     )
+
+
+# === POLL-SPECIFIC UTILITIES ===
+
+
+def notify_poll_closed(poll, send_push=True, use_async=None):
+    """
+    Notify poll followers when a poll is closed and results are available.
+
+    Args:
+        poll: The poll that was closed
+        send_push: Whether to send push notification
+        use_async: Override global async setting (None uses global setting)
+
+    Returns:
+        Celery task result if async, list of Notification objects if sync
+    """
+    if use_async is None:
+        use_async = USE_ASYNC_NOTIFICATIONS
+
+    from keyopolls.notifications.models import PollFollow
+    from keyopolls.notifications.services import URLBuilder
+
+    # Get all poll followers
+    followers = PollFollow.objects.filter(poll=poll, is_active=True).select_related(
+        "follower"
+    )
+
+    if not followers.exists():
+        return []
+
+    notifications_sent = []
+    click_url = URLBuilder.build_poll_url(poll.id)
+    deep_link_data = URLBuilder.build_deep_link_data(
+        "poll", {"poll_id": poll.id, "view": "results"}
+    )
+
+    for poll_follow in followers:
+        follower = poll_follow.follower
+
+        # Don't notify the poll owner
+        if follower.id == poll.profile.id:
+            continue
+
+        notification = AsyncNotificationService.send_notification(
+            recipient=follower,
+            notification_type=NotificationType.SYSTEM,
+            title="Poll Results Available",
+            message=f"Results are now available for: {poll.title}",
+            target=poll,
+            click_url=click_url,
+            deep_link_data=deep_link_data,
+            send_push=send_push,
+            use_async=use_async,
+        )
+
+        notifications_sent.append(notification)
+
+    return notifications_sent
+
+
+def get_user_poll_activity_summary(user, days=7):
+    """
+    Get a summary of poll-related notifications for a user.
+
+    Args:
+        user: The user to get activity for
+        days: Number of days to look back
+
+    Returns:
+        dict: Summary of poll activity
+    """
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from keyopolls.notifications.models import Notification
+
+    since = timezone.now() - timedelta(days=days)
+
+    notifications = Notification.objects.filter(recipient=user, created_at__gte=since)
+
+    summary = {
+        "poll_comments": notifications.filter(
+            notification_type=NotificationType.POLL_COMMENT
+        ).count(),
+        "poll_votes": notifications.filter(
+            notification_type=NotificationType.POLL_VOTE
+        ).count(),
+        "comment_replies": notifications.filter(
+            notification_type=NotificationType.REPLY
+        ).count(),
+        "new_followers": notifications.filter(
+            notification_type=NotificationType.FOLLOW
+        ).count(),
+        "mentions": notifications.filter(
+            notification_type=NotificationType.MENTION
+        ).count(),
+        "milestones": notifications.filter(
+            notification_type__in=[
+                NotificationType.VOTE_MILESTONE,
+                NotificationType.LIKE_MILESTONE,
+                NotificationType.FOLLOWER_MILESTONE,
+                NotificationType.REPLIES_MILESTONE,
+            ]
+        ).count(),
+        "community_notifications": notifications.filter(
+            notification_type__in=[
+                NotificationType.COMMUNITY_NEW_POLL,
+                NotificationType.COMMUNITY_INVITE,
+                NotificationType.COMMUNITY_ROLE_CHANGE,
+            ]
+        ).count(),
+        "total_notifications": notifications.count(),
+        "unread_notifications": notifications.filter(is_read=False).count(),
+    }
+
+    return summary

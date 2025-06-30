@@ -1,11 +1,12 @@
 from typing import Any, Dict, List, Optional
 
-from keyoconnect.comments.models import GenericComment
-from keyoconnect.common.models import Reaction
-from keyoconnect.common.schemas import LinkSchema, MediaSchema
-from keyoconnect.profiles.schemas import AuthorSchema, ProfileType
-from keyoconnect.utils import get_author_info, get_link_info, get_media_info
 from ninja import Field, Schema
+
+from keyopolls.comments.models import GenericComment
+from keyopolls.common.models import Reaction
+from keyopolls.common.schemas import LinkSchema, MediaSchema
+from keyopolls.profile.schemas import AuthorSchema
+from keyopolls.utils import get_author_info, get_link_info, get_media_info
 
 
 class CreateLinkSchema(Schema):
@@ -17,7 +18,6 @@ class CommentCreateSchema(Schema):
     """Schema for comment creation"""
 
     content: str
-    profile_type: ProfileType
     parent_id: Optional[int] = None
     link: Optional[CreateLinkSchema] = None
 
@@ -44,7 +44,6 @@ class CommentOut(Schema):
     id: int
     content: str
     parent_id: Optional[int] = None  # For parent context comments
-    profile_type: ProfileType
     created_at: str
     updated_at: str
     is_edited: bool
@@ -97,46 +96,36 @@ class CommentOut(Schema):
 
         Args:
             comment: GenericComment instance
-            auth_data: Authentication data containing user profiles
+            auth_data: Authentication data containing user profile
             include_replies: Whether to include nested replies (default: True)
                            Set to False for parent context comments in thread view
         """
 
-        # Get user reactions across all authenticated profiles
+        # Get user reactions for authenticated profile
         user_reactions = {}
-        profiles = auth_data.get("profiles", {})
+        profile = auth_data.get("profile")
 
-        for profile_type, profile_obj in profiles.items():
-            if profile_obj:
-                try:
-                    profile_reactions = Reaction.get_user_reactions_by_profile_info(
-                        profile_type, profile_obj.id, comment
-                    )
-                    # Merge reactions from all profiles
-                    for reaction_type, has_reacted in profile_reactions.items():
-                        if has_reacted:
-                            user_reactions[reaction_type] = True
-                except Exception:
-                    continue
+        if profile:
+            try:
+                profile_reactions = Reaction.get_user_reactions_by_profile(
+                    profile, comment
+                )
+                # Use profile reactions directly
+                user_reactions = profile_reactions
+            except Exception:
+                pass
 
         # Check if user is the author
         is_author = False
         try:
-            for profile_type, user_profile in profiles.items():
-                if (
-                    user_profile
-                    and comment.profile_type == profile_type
-                    and comment.profile_id == user_profile.id
-                ):
-                    is_author = True
-                    break
+            if profile and comment.profile.id == profile.id:
+                is_author = True
         except Exception:
             pass
 
         # Use get_author_info to get standardized author information
         author_info = get_author_info(
-            profile_id=comment.profile_id,
-            profile_type=comment.profile_type,
+            profile=comment.profile,
             anonymous_identifier=comment.anonymous_comment_identifier,
         )
 
@@ -227,7 +216,6 @@ class CommentOut(Schema):
             id=comment.id,
             parent_id=comment.parent_id,
             content=comment.content,
-            profile_type=comment.profile_type,
             created_at=comment.created_at.isoformat(),
             updated_at=comment.updated_at.isoformat(),
             is_edited=comment.is_edited,

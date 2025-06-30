@@ -1,43 +1,54 @@
 import logging
+from typing import Any, Dict
 
 from django.apps import apps
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
-from django.http import HttpRequest
 from django.utils.text import slugify
-from keyoconnect.common.models import Link, Media, Tag, TaggedItem
-from keyoconnect.common.schemas import ContentTypeEnum
-from keyoconnect.profiles.models import AnonymousProfile, PublicProfile
-from keyoconnect.profiles.schemas import ProfileType
 from ninja import UploadedFile
 from PIL import Image
+
+from keyopolls.common.models import Link, Media, Tag, TaggedItem
+from keyopolls.common.schemas import ContentTypeEnum
+from keyopolls.profile.models import PseudonymousProfile
 
 logger = logging.getLogger(__name__)
 
 
-def get_profile_and_type(request: HttpRequest):
-    """Helper function to extract profile and profile_type from request.auth"""
-    if not request.auth:
-        return None, None
+def get_author_info(profile: PseudonymousProfile) -> Dict[str, Any]:
+    """
+    Helper function to get author information for pseudonymous profiles.
+    Much simpler than the previous multi-profile-type version.
 
-    profile = request.auth
-    profile_type: ProfileType = getattr(profile, "_auth_profile_type", None)
+    Args:
+        profile: PseudonymousProfile instance
 
-    # Fallback: determine profile type from model class
-    if isinstance(profile, PublicProfile):
-        profile_type = "public"
-    elif isinstance(profile, AnonymousProfile):
-        profile_type = "anonymous"
+    Returns:
+        Dictionary containing author information according to AuthorSchema
+    """
+    if not profile:
+        # Return default values for missing profile
+        return {
+            "id": 0,
+            "username": "Unknown",
+            "display_name": "Unknown User",
+            "total_aura": 0,
+        }
 
-    return profile, profile_type
+    return {
+        "id": profile.id,
+        "username": profile.username,
+        "display_name": profile.display_name,
+        "total_aura": profile.total_aura,
+    }
 
 
 def get_content_object(content_type: ContentTypeEnum, object_id: int):
     """Get the content object based on content type enum and ID"""
     # Map of content type enums to model classes
     content_type_map = {
-        ContentTypeEnum.POST: "Post",
-        ContentTypeEnum.POST_COMMENT: "GenericComment",
+        ContentTypeEnum.POLL: "Post",
+        ContentTypeEnum.COMMENT: "GenericComment",
     }
 
     model_name = content_type_map[content_type]
@@ -278,3 +289,72 @@ def update_original_post_counters(original_post, is_repost, increment=True):
         original_post.quote_count = max(0, original_post.quote_count + multiplier)
 
     original_post.save()
+
+
+# Helper Functions
+def get_media_info(media_obj: Media) -> Dict[str, Any]:
+    """
+    Helper function to convert Media object to dictionary representation
+
+    Args:
+        media_obj: Media model instance
+
+    Returns:
+        Dictionary containing media information according to MediaSchema
+    """
+    if not media_obj:
+        return {}
+
+    try:
+        return {
+            "id": media_obj.id,
+            "media_type": media_obj.media_type,
+            "file_url": media_obj.file.url if media_obj.file else None,
+            "thumbnail_url": media_obj.thumbnail.url if media_obj.thumbnail else None,
+            "width": media_obj.width,
+            "height": media_obj.height,
+            "alt_text": media_obj.alt_text,
+            "duration": media_obj.duration,
+            "order": media_obj.order,
+            "created_at": (
+                media_obj.created_at.isoformat() if media_obj.created_at else None
+            ),
+        }
+    except Exception:
+        # Log error if logging is available
+        # logger.error(f"Error converting media object {media_obj.id}: {str(e)}")
+        return {}
+
+
+def get_link_info(link_obj: Link) -> Dict[str, Any]:
+    """
+    Helper function to convert Link object to dictionary representation
+
+    Args:
+        link_obj: Link model instance
+
+    Returns:
+        Dictionary containing link information according to LinkSchema
+    """
+    if not link_obj:
+        return {}
+
+    try:
+        return {
+            "id": link_obj.id,
+            "url": link_obj.url,
+            "display_text": link_obj.display_text,
+            "domain": link_obj.domain,
+            "title": link_obj.title,
+            "description": link_obj.description,
+            "image_url": link_obj.image_url,
+            "is_active": link_obj.is_active,
+            "click_count": link_obj.click_count,
+            "created_at": (
+                link_obj.created_at.isoformat() if link_obj.created_at else None
+            ),
+        }
+    except Exception:
+        # Log error if logging is available
+        # logger.error(f"Error converting link object {link_obj.id}: {str(e)}")
+        return {}

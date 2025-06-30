@@ -3,8 +3,9 @@ from enum import Enum
 from typing import Dict, Literal, Optional
 from uuid import UUID
 
-from keyoconnect.common.models import UploadedImage
 from ninja import ModelSchema, Schema
+
+from keyopolls.common.models import UploadedImage
 
 
 class MediaSchema(Schema):
@@ -134,8 +135,8 @@ class FollowRequest(Schema):
 class ContentTypeEnum(str, Enum):
     """Enum for valid content types"""
 
-    POST = "post"
-    POST_COMMENT = "post_comment"
+    POLL = "post"
+    COMMENT = "comment"
 
 
 """

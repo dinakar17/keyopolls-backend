@@ -69,15 +69,21 @@ class ImpressionTrackingMixin:
 
 
 class Impression(models.Model):
-    """Generic impression tracking model for public profiles only"""
+    """Generic impression tracking model for PseudonymousProfile"""
 
     # Generic foreign key to track impressions for any model
     content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
     object_id = models.PositiveIntegerField()
     content_object = GenericForeignKey("content_type", "object_id")
 
-    # Profile-based authentication info (only public profiles)
-    profile_id = models.PositiveIntegerField(null=True, blank=True)
+    # Profile-based authentication info (nullable for anonymous users)
+    profile = models.ForeignKey(
+        "profile.PseudonymousProfile",
+        on_delete=models.CASCADE,
+        related_name="impressions",
+        null=True,
+        blank=True,
+    )
 
     # Session/device info for anonymous users
     ip_address = models.GenericIPAddressField()
@@ -100,9 +106,21 @@ class Impression(models.Model):
         indexes = [
             models.Index(fields=["content_type", "object_id", "created_at"]),
             models.Index(fields=["ip_address", "created_at"]),
-            models.Index(fields=["profile_id", "created_at"]),
+            models.Index(fields=["profile", "created_at"]),
             models.Index(fields=["session_key", "created_at"]),
         ]
+
+    def __str__(self):
+        if self.profile:
+            return (
+                f"Impression by {self.profile.username} on "
+                f"{self.content_type.model} {self.object_id}"
+            )
+        else:
+            return (
+                f"Anonymous impression ({self.ip_address}) on "
+                f"{self.content_type.model} {self.object_id}"
+            )
 
     @classmethod
     def record_for_object(cls, obj, request):
@@ -122,15 +140,15 @@ class Impression(models.Model):
         referrer = request.META.get("HTTP_REFERER", "")
 
         # Extract profile info from request.auth (simplified)
-        profile_id = cls._extract_profile_id(request)
+        profile = cls._extract_profile(request)
 
         # Check if we should record this impression
-        if cls._should_record_impression(obj, profile_id, ip_address, session_key):
+        if cls._should_record_impression(obj, profile, ip_address, session_key):
             with transaction.atomic():
                 # Create the impression record
                 cls.objects.create(
                     content_object=obj,
-                    profile_id=profile_id,
+                    profile=profile,
                     ip_address=ip_address,
                     session_key=session_key,
                     user_agent_hash=(
@@ -167,7 +185,7 @@ class Impression(models.Model):
             return stats
 
         # Extract request info once for all objects
-        profile_id = cls._extract_profile_id(request)
+        profile = cls._extract_profile(request)
         ip_address = cls._get_client_ip(request)
         session_key = (
             request.session.session_key if hasattr(request, "session") else None
@@ -181,10 +199,10 @@ class Impression(models.Model):
 
         for obj in objects_list:
             # Check if we should record impression for this object
-            if cls._should_record_impression(obj, profile_id, ip_address, session_key):
+            if cls._should_record_impression(obj, profile, ip_address, session_key):
                 impression = cls(
                     content_object=obj,
-                    profile_id=profile_id,
+                    profile=profile,
                     ip_address=ip_address,
                     session_key=session_key,
                     user_agent_hash=(
@@ -230,31 +248,30 @@ class Impression(models.Model):
         return stats
 
     @classmethod
-    def _extract_profile_id(cls, request):
-        """Extract profile ID from request.auth - only public profiles"""
+    def _extract_profile(cls, request):
+        """Extract profile from request.auth - only pseudonymous profiles"""
         if not hasattr(request, "auth") or request.auth is None:
             return None
 
-        # Handle public profile object directly (from PublicJWTAuth or
-        # OptionalPublicJWTAuth)
-        if hasattr(request.auth, "id"):
-            return request.auth.id
+        # Handle pseudonymous profile object directly
+        if hasattr(request.auth, "id") and hasattr(request.auth, "username"):
+            return request.auth
 
         return None
 
     @classmethod
-    def _should_record_impression(cls, obj, profile_id, ip_address, session_key):
+    def _should_record_impression(cls, obj, profile, ip_address, session_key):
         """Determine if we should record this impression"""
         now = timezone.now()
         content_type = ContentType.objects.get_for_model(obj)
 
-        # Rule 1: Authenticated users (public profile) - max 1 impression per day
-        if profile_id:
+        # Rule 1: Authenticated users (pseudonymous profile) - max 1 impression per day
+        if profile:
             today = now.date()
             return not cls.objects.filter(
                 content_type=content_type,
                 object_id=obj.pk,
-                profile_id=profile_id,
+                profile=profile,
                 created_at__date=today,
             ).exists()
 
@@ -263,7 +280,7 @@ class Impression(models.Model):
         return not cls.objects.filter(
             content_type=content_type,
             object_id=obj.pk,
-            profile_id__isnull=True,
+            profile__isnull=True,
             ip_address=ip_address,
             session_key=session_key,
             created_at__gte=one_hour_ago,
@@ -291,8 +308,8 @@ class Impression(models.Model):
 
         # Calculate unique profiles (authenticated users)
         unique_profiles = (
-            impressions.filter(profile_id__isnull=False)
-            .values("profile_id")
+            impressions.filter(profile__isnull=False)
+            .values("profile")
             .distinct()
             .count()
         )
@@ -301,11 +318,9 @@ class Impression(models.Model):
             "total_impressions": impressions.count(),
             "unique_profiles": unique_profiles,
             "unique_ips": impressions.values("ip_address").distinct().count(),
-            "anonymous_impressions": impressions.filter(
-                profile_id__isnull=True
-            ).count(),
+            "anonymous_impressions": impressions.filter(profile__isnull=True).count(),
             "authenticated_impressions": impressions.filter(
-                profile_id__isnull=False
+                profile__isnull=False
             ).count(),
             "daily_breakdown": cls._get_daily_breakdown(impressions, days),
         }
@@ -324,6 +339,61 @@ class Impression(models.Model):
         )
 
         return list(daily_data)
+
+    @classmethod
+    def get_top_content_by_impressions(cls, content_type_name, days=30, limit=10):
+        """
+        Get top content by impressions for a specific content type.
+
+        Args:
+            content_type_name: String name of content type (e.g., 'poll', 'comment')
+            days: Number of days to look back
+            limit: Number of results to return
+
+        Returns:
+            List of tuples: (object_id, impression_count)
+        """
+        since = timezone.now() - timedelta(days=days)
+
+        try:
+            content_type = ContentType.objects.get(model=content_type_name.lower())
+        except ContentType.DoesNotExist:
+            return []
+
+        return list(
+            cls.objects.filter(content_type=content_type, created_at__gte=since)
+            .values("object_id")
+            .annotate(impression_count=models.Count("id"))
+            .order_by("-impression_count")[:limit]
+        )
+
+    @classmethod
+    def get_user_impression_history(cls, profile, days=30, content_type_name=None):
+        """
+        Get impression history for a specific user.
+
+        Args:
+            profile: PseudonymousProfile instance
+            days: Number of days to look back
+            content_type_name: Optional content type filter
+
+        Returns:
+            QuerySet of Impression objects
+        """
+        since = timezone.now() - timedelta(days=days)
+
+        queryset = cls.objects.filter(
+            profile=profile, created_at__gte=since
+        ).select_related("content_type")
+
+        if content_type_name:
+            try:
+                content_type = ContentType.objects.get(model=content_type_name.lower())
+                queryset = queryset.filter(content_type=content_type)
+            except ContentType.DoesNotExist:
+                return cls.objects.none()
+
+        return queryset.order_by("-created_at")
 
 
 # Utility function for list impression tracking

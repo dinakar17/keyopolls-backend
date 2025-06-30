@@ -1,32 +1,32 @@
 import logging
 from typing import Dict, List, Optional
 
-from django.contrib.contenttypes.models import ContentType
-from keyoconnect.connect_notifications.models import FCMDevice, NotificationPreference
-from keyoconnect.profiles.models import PublicProfile
 from shared.notifications.firebase import FirebaseService
+
+from keyopolls.notifications.models import FCMDevice, NotificationPreference
+from keyopolls.profile.models import PseudonymousProfile
 
 logger = logging.getLogger(__name__)
 
 
 class FCMService:
-    """FCM service for device registration and notification sending using profiles"""
+    """FCM service for device registration and notification sending using
+    PseudonymousProfile"""
 
     @classmethod
     def register_device(
         cls,
         token: str,
         device_type: str,
-        profile: PublicProfile,
+        profile: PseudonymousProfile,
         device_info: Optional[Dict] = None,
     ) -> Dict:
-        """Register FCM device token for a Public profile"""
+        """Register FCM device token for a PseudonymousProfile"""
         try:
-            if not isinstance(profile, PublicProfile):
+            if not isinstance(profile, PseudonymousProfile):
                 return {
                     "success": False,
-                    "message": "Only Public profiles can register for push "
-                    "notifications",
+                    "message": "Invalid profile type for device registration",
                 }
 
             # Extra device info
@@ -45,7 +45,7 @@ class FCMService:
             )
 
             # Ensure the profile has notification preferences
-            NotificationPreference.get_or_create_default_preferences(profile)
+            cls._ensure_default_preferences(profile)
 
             return {
                 "success": True,
@@ -75,43 +75,43 @@ class FCMService:
     @classmethod
     def notify_profile(
         cls,
-        profile: PublicProfile,
+        profile: PseudonymousProfile,
         title: str,
         body: str,
         data: Optional[Dict] = None,
         notification_type: Optional[str] = None,
     ) -> Dict:
-        """Send notification to a Public profile"""
+        """Send notification to a PseudonymousProfile"""
         try:
-            if not isinstance(profile, PublicProfile):
+            if not isinstance(profile, PseudonymousProfile):
                 return {
                     "success": False,
-                    "message": "Only Public profiles can receive push notifications",
+                    "message": "Invalid profile type for notifications",
                     "sent": 0,
                     "total": 0,
                 }
 
-            # Check if push notifications are enabled for this profile and
-            # notification type
+            # Check if push notifications are enabled for this profile and notification
+            #  type
             if notification_type:
                 try:
                     preference = NotificationPreference.objects.get(
-                        profile_content_type=ContentType.objects.get_for_model(profile),
-                        profile_object_id=profile.id,
+                        profile=profile,
                         notification_type=notification_type,
                     )
-                    if not preference.push_enabled:
+                    if not preference.push_enabled or not preference.is_enabled:
                         return {
                             "success": False,
                             "message": (
-                                f"Push notifications disabled for {notification_type}"
+                                f"Push notifications disabled for "
+                                f"{notification_type}"
                             ),
                             "sent": 0,
                             "total": 0,
                         }
                 except NotificationPreference.DoesNotExist:
                     # Create default preferences if they don't exist
-                    NotificationPreference.get_or_create_default_preferences(profile)
+                    cls._ensure_default_preferences(profile)
                     # For safety, don't send if preferences don't exist
                     return {
                         "success": False,
@@ -139,7 +139,7 @@ class FCMService:
             notification_data.update(
                 {
                     "profile_id": str(profile.id),
-                    "profile_type": "public",
+                    "profile_username": profile.username,
                     "notification_type": notification_type or "general",
                 }
             )
@@ -158,8 +158,8 @@ class FCMService:
             return {
                 "success": result["success"] > 0,
                 "message": (
-                    f"Sent to {result['success']} devices "
-                    f"with {result['failure']} failures"
+                    f"Sent to {result['success']} devices with "
+                    f"{result['failure']} failures"
                 ),
                 "sent": result["success"],
                 "total": len(tokens),
@@ -171,41 +171,38 @@ class FCMService:
     @classmethod
     def notify_profiles(
         cls,
-        profiles: List[PublicProfile],
+        profiles: List[PseudonymousProfile],
         title: str,
         body: str,
         data: Optional[Dict] = None,
         notification_type: Optional[str] = None,
     ) -> Dict:
-        """Send notification to multiple Public profiles"""
+        """Send notification to multiple PseudonymousProfiles"""
         try:
-            # Filter to only Public profiles
-            public_profiles = [p for p in profiles if isinstance(p, PublicProfile)]
+            # Filter to only PseudonymousProfile instances
+            valid_profiles = [p for p in profiles if isinstance(p, PseudonymousProfile)]
 
-            if not public_profiles:
+            if not valid_profiles:
                 return {
                     "success": False,
-                    "message": "No Public profiles found",
+                    "message": "No valid profiles found",
                     "sent": 0,
                     "total": 0,
                 }
 
-            profile_ids = [p.id for p in public_profiles]
+            profile_ids = [p.id for p in valid_profiles]
 
             # Get profiles with push enabled for this notification type
             enabled_profile_ids = profile_ids
             if notification_type:
                 enabled_preferences = NotificationPreference.objects.filter(
-                    profile_content_type=ContentType.objects.get_for_model(
-                        PublicProfile
-                    ),
-                    profile_object_id__in=profile_ids,
+                    profile_id__in=profile_ids,
                     notification_type=notification_type,
                     push_enabled=True,
                     is_enabled=True,
                 )
                 enabled_profile_ids = list(
-                    enabled_preferences.values_list("profile_object_id", flat=True)
+                    enabled_preferences.values_list("profile_id", flat=True)
                 )
 
             if not enabled_profile_ids:
@@ -283,27 +280,21 @@ class FCMService:
             enabled_profile_ids = []
             if notification_type:
                 enabled_preferences = NotificationPreference.objects.filter(
-                    profile_content_type=ContentType.objects.get_for_model(
-                        PublicProfile
-                    ),
                     notification_type=notification_type,
                     push_enabled=True,
                     is_enabled=True,
                 )
                 enabled_profile_ids = list(
-                    enabled_preferences.values_list("profile_object_id", flat=True)
+                    enabled_preferences.values_list("profile_id", flat=True)
                 )
             else:
-                # If no specific type, get all public profiles with any push enabled
+                # If no specific type, get all profiles with any push enabled
                 enabled_profile_ids = list(
                     NotificationPreference.objects.filter(
-                        profile_content_type=ContentType.objects.get_for_model(
-                            PublicProfile
-                        ),
                         push_enabled=True,
                         is_enabled=True,
                     )
-                    .values_list("profile_object_id", flat=True)
+                    .values_list("profile_id", flat=True)
                     .distinct()
                 )
 
@@ -354,8 +345,8 @@ class FCMService:
             return {
                 "success": result["success"] > 0,
                 "message": (
-                    f"Broadcast sent to {result['success']} devices "
-                    f"with {result['failure']} failures"
+                    f"Broadcast sent to {result['success']} devices with "
+                    f"{result['failure']} failures"
                 ),
                 "sent": result["success"],
                 "total": len(tokens),
@@ -365,7 +356,7 @@ class FCMService:
             return {"success": False, "message": str(e), "sent": 0, "total": 0}
 
     @classmethod
-    def get_profile_devices(cls, profile: PublicProfile) -> Dict:
+    def get_profile_devices(cls, profile: PseudonymousProfile) -> Dict:
         """Get all devices for a profile"""
         try:
             devices = FCMDevice.objects.filter(profile=profile)
@@ -400,7 +391,7 @@ class FCMService:
     @classmethod
     def update_notification_preferences(
         cls,
-        profile,
+        profile: PseudonymousProfile,
         notification_type: str,
         push_enabled: Optional[bool] = None,
         email_enabled: Optional[bool] = None,
@@ -410,18 +401,13 @@ class FCMService:
         """Update notification preferences for a profile"""
         try:
             preference, created = NotificationPreference.objects.get_or_create(
-                profile_content_type=ContentType.objects.get_for_model(profile),
-                profile_object_id=profile.id,
+                profile=profile,
                 notification_type=notification_type,
             )
 
             # Update fields if provided
             if push_enabled is not None:
-                # Only allow push notifications for Public profiles
-                if isinstance(profile, PublicProfile):
-                    preference.push_enabled = push_enabled
-                else:
-                    preference.push_enabled = False
+                preference.push_enabled = push_enabled
 
             if email_enabled is not None:
                 preference.email_enabled = email_enabled
@@ -442,3 +428,154 @@ class FCMService:
         except Exception as e:
             logger.error(f"Error updating notification preferences: {str(e)}")
             return {"success": False, "message": str(e)}
+
+    @classmethod
+    def get_notification_preferences(cls, profile: PseudonymousProfile) -> Dict:
+        """Get all notification preferences for a profile"""
+        try:
+            preferences = NotificationPreference.objects.filter(profile=profile)
+
+            pref_data = []
+            for pref in preferences:
+                pref_data.append(
+                    {
+                        "notification_type": pref.notification_type,
+                        "in_app_enabled": pref.in_app_enabled,
+                        "push_enabled": pref.push_enabled,
+                        "email_enabled": pref.email_enabled,
+                        "is_enabled": pref.is_enabled,
+                        "custom_thresholds": pref.custom_thresholds,
+                    }
+                )
+
+            return {
+                "success": True,
+                "preferences": pref_data,
+                "total": len(pref_data),
+            }
+        except Exception as e:
+            logger.error(f"Error getting notification preferences: {str(e)}")
+            return {"success": False, "message": str(e), "preferences": []}
+
+    @classmethod
+    def _ensure_default_preferences(cls, profile: PseudonymousProfile):
+        """Ensure profile has default notification preferences"""
+        try:
+            from keyopolls.notifications.models import NotificationType
+
+            # Create default preferences for all notification types
+            for notification_type, _ in NotificationType.choices:
+                NotificationPreference.get_or_create_for_type(
+                    profile, notification_type
+                )
+
+        except Exception as e:
+            logger.error(f"Error creating default preferences: {str(e)}")
+
+    @classmethod
+    def notify_community_members(
+        cls,
+        community,
+        title: str,
+        body: str,
+        data: Optional[Dict] = None,
+        notification_type: Optional[str] = None,
+        exclude_profile: Optional[PseudonymousProfile] = None,
+    ) -> Dict:
+        """Send notification to all members of a community"""
+        try:
+            # Get all active community members
+            from keyopolls.communities.models import CommunityMembership
+
+            memberships = CommunityMembership.objects.filter(
+                community=community, status="active"
+            ).select_related("profile")
+
+            profiles = [m.profile for m in memberships]
+
+            # Exclude specific profile if provided (e.g., the actor)
+            if exclude_profile:
+                profiles = [p for p in profiles if p.id != exclude_profile.id]
+
+            if not profiles:
+                return {
+                    "success": False,
+                    "message": "No community members found",
+                    "sent": 0,
+                    "total": 0,
+                }
+
+            # Add community context to data
+            community_data = data or {}
+            community_data.update(
+                {
+                    "community_id": str(community.id),
+                    "community_name": community.name,
+                }
+            )
+
+            return cls.notify_profiles(
+                profiles=profiles,
+                title=title,
+                body=body,
+                data=community_data,
+                notification_type=notification_type,
+            )
+
+        except Exception as e:
+            logger.error(f"Error notifying community members: {str(e)}")
+            return {"success": False, "message": str(e), "sent": 0, "total": 0}
+
+    @classmethod
+    def notify_poll_followers(
+        cls,
+        poll,
+        title: str,
+        body: str,
+        data: Optional[Dict] = None,
+        notification_type: Optional[str] = None,
+        exclude_profile: Optional[PseudonymousProfile] = None,
+    ) -> Dict:
+        """Send notification to all followers of a poll"""
+        try:
+            # Get all active poll followers
+            from keyopolls.notifications.models import PollFollow
+
+            follows = PollFollow.objects.filter(
+                poll=poll, is_active=True
+            ).select_related("follower")
+
+            profiles = [f.follower for f in follows]
+
+            # Exclude specific profile if provided (e.g., the actor)
+            if exclude_profile:
+                profiles = [p for p in profiles if p.id != exclude_profile.id]
+
+            if not profiles:
+                return {
+                    "success": False,
+                    "message": "No poll followers found",
+                    "sent": 0,
+                    "total": 0,
+                }
+
+            # Add poll context to data
+            poll_data = data or {}
+            poll_data.update(
+                {
+                    "poll_id": str(poll.id),
+                    "poll_title": poll.title,
+                }
+            )
+
+            return cls.notify_profiles(
+                profiles=profiles,
+                title=title,
+                body=body,
+                data=poll_data,
+                notification_type=notification_type,
+            )
+
+        except Exception as e:
+            logger.error(f"Error notifying poll followers: {str(e)}")
+            return {"success": False, "message": str(e), "sent": 0, "total": 0}

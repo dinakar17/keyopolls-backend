@@ -1,5 +1,3 @@
-import random
-
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
@@ -9,13 +7,8 @@ from django.utils import timezone
 class GenericComment(models.Model):
     """
     Generic comment model for any content type (posts, community posts, articles, etc.)
-    with simplified profile type selection - supports independent profiles
+    with PseudonymousProfile integration
     """
-
-    PROFILE_TYPE_CHOICES = (
-        ("public", "Public"),
-        ("anonymous", "Anonymous"),
-    )
 
     MODERATION_STATUS_CHOICES = (
         ("pending", "Pending Review"),
@@ -32,12 +25,9 @@ class GenericComment(models.Model):
     object_id = models.BigIntegerField()
     content_object = GenericForeignKey("content_type", "object_id")
 
-    # Simplified profile reference - much cleaner!
-    profile_type = models.CharField(
-        max_length=15, choices=PROFILE_TYPE_CHOICES, default="public"
-    )
-    profile_id = models.BigIntegerField(
-        help_text="ID of the profile based on profile_type"
+    # Profile reference - direct foreign key to PseudonymousProfile
+    profile = models.ForeignKey(
+        "profile.PseudonymousProfile", on_delete=models.CASCADE, related_name="comments"
     )
 
     # For anonymous comments, store a unique identifier for display
@@ -92,17 +82,13 @@ class GenericComment(models.Model):
     is_taken_down = models.BooleanField(default=False)
     takedown_reason = models.CharField(max_length=100, blank=True)
     takedown_date = models.DateTimeField(null=True, blank=True)
-    takedown_by_profile_type = models.CharField(
-        max_length=15,
-        choices=PROFILE_TYPE_CHOICES,
+    takedown_by = models.ForeignKey(
+        "profile.PseudonymousProfile",
+        on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        help_text="Profile type of the moderator who took down this comment",
-    )
-    takedown_by_profile_id = models.BigIntegerField(
-        null=True,
-        blank=True,
-        help_text="ID of the moderator profile who took down this comment",
+        related_name="takedown_actions",
+        help_text="Profile who took down this comment",
     )
     auto_takedown = models.BooleanField(default=False)
 
@@ -116,9 +102,7 @@ class GenericComment(models.Model):
         indexes = [
             models.Index(fields=["content_type", "object_id", "-created_at"]),
             models.Index(fields=["parent", "-created_at"]),
-            models.Index(fields=["profile_type", "profile_id"]),
-            models.Index(fields=["profile_type", "-created_at"]),
-            models.Index(fields=["anonymous_comment_identifier"]),
+            models.Index(fields=["profile", "-created_at"]),
             models.Index(fields=["is_flagged", "moderation_status"]),
             models.Index(fields=["comment_source", "-created_at"]),
             models.Index(fields=["community_id", "-created_at"]),
@@ -126,13 +110,9 @@ class GenericComment(models.Model):
         ]
 
     def __str__(self):
-        return f"Comment {self.id} by {self.profile_type} {self.profile_id}"
+        return f"Comment {self.id} by {self.profile.username}"
 
     def save(self, *args, **kwargs):
-        # Generate anonymous comment identifier if anonymous and not set
-        if self.profile_type == "anonymous" and not self.anonymous_comment_identifier:
-            self.anonymous_comment_identifier = f"A-{random.randint(100, 999)}"
-
         # Calculate depth if this is a reply
         if self.parent:
             self.depth = self.parent.depth + 1
@@ -183,13 +163,13 @@ class GenericComment(models.Model):
         )
 
     def take_down(
-        self, reason="Violated community standards", by_member=None, auto=False
+        self, reason="Violated community standards", by_profile=None, auto=False
     ):
         """Take down a comment (for violations)"""
         self.is_taken_down = True
         self.takedown_reason = reason
         self.takedown_date = timezone.now()
-        self.takedown_by = by_member
+        self.takedown_by = by_profile
         self.auto_takedown = auto
         self.save(
             update_fields=[
@@ -251,3 +231,18 @@ class GenericComment(models.Model):
         return self.replies.filter(
             is_deleted=False, is_taken_down=False, moderation_status="approved"
         )
+
+    @property
+    def author_display_name(self):
+        """Get the display name of the comment author"""
+        return self.profile.display_name
+
+    @property
+    def author_username(self):
+        """Get the username of the comment author"""
+        return self.profile.username
+
+    @property
+    def author_aura(self):
+        """Get the total aura of the comment author"""
+        return self.profile.total_aura

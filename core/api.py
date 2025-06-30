@@ -7,12 +7,16 @@ from ninja import NinjaAPI
 from ninja.errors import AuthenticationError, HttpError, HttpRequest, ValidationError
 from ninja.throttling import AnonRateThrottle, AuthRateThrottle
 
+from keyopolls.comments.api import router as comments_router
+from keyopolls.common import router as common_router
+from keyopolls.profile.api import router as profile_router
+from keyopolls.profile.middleware import AuthError
 
 api = NinjaAPI(
     docs_url="docs/",
     title="Keyo API",
     version="1.0.0",
-    description="API for Keyo polls app",
+    description="API for Keyo Polls app",
     urls_namespace="api_v1",
     throttle=[
         AnonRateThrottle("60/m"),  # Unauthenticated: 60 requests per minute
@@ -25,13 +29,13 @@ Custom Exception Handlers
 """
 
 
-# # Single exception handler for all authentication errors
-# # We're overriding the default django-ninja authentication error handler
-# @api.exception_handler(AuthError)
-# def auth_error_handler(request, exc):
-#     return api.create_response(
-#         request, {"message": exc.message}, status=exc.status_code
-#     )
+# Single exception handler for all authentication errors
+# We're overriding the default django-ninja authentication error handler
+@api.exception_handler(AuthError)
+def auth_error_handler(request, exc):
+    return api.create_response(
+        request, {"message": exc.message}, status=exc.status_code
+    )
 
 
 """
@@ -96,7 +100,11 @@ def generic_error_handler(request: HttpRequest, exc: Exception):
     return api.create_response(request, {"message": error_message}, status=500)
 
 
-# api.add_router("/shared", shared_router)
-# api.add_router("/connect", connect_router)
-# api.add_router("/sparkle", sparkle_router)
-# api.add_router("/keyorewards", keyorewards_router)
+try:
+    api.add_router("/user", profile_router)
+    api.add_router("/comments", comments_router)
+    api.add_router("/common", common_router)
+except ImportError as e:
+    print(f"Error importing routers: {e}")
+    logging.error(f"Failed to import routers: {e}")
+    raise ImportError("Failed to import API routers. Please check your imports.")
