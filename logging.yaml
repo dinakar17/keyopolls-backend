@@ -1,0 +1,255 @@
+version: 1
+disable_existing_loggers: false
+
+formatters:
+  verbose:
+    format: "{levelname} {asctime} {name} {module} {process:d} {thread:d} {message}"
+    style: "{"
+    datefmt: "%Y-%m-%d %H:%M:%S"
+
+  simple:
+    format: "{levelname} {asctime} {name} {message}"
+    style: "{"
+    datefmt: "%Y-%m-%d %H:%M:%S"
+
+  django_server:
+    format: "[{asctime}] {levelname} {name} {message}"
+    style: "{"
+    datefmt: "%Y-%m-%d %H:%M:%S"
+
+  minimal:
+    format: "{levelname} {message}"
+    style: "{"
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    level: DEBUG
+    formatter: simple
+    stream: ext://sys.stdout
+
+  file_general:
+    class: logging.handlers.RotatingFileHandler
+    level: INFO
+    formatter: verbose
+    filename: logs/django_general.log
+    maxBytes: 10485760 # 10MB
+    backupCount: 5
+    encoding: utf8
+
+  file_errors:
+    class: logging.handlers.RotatingFileHandler
+    level: ERROR
+    formatter: verbose
+    filename: logs/django_errors.log
+    maxBytes: 10485760 # 10MB
+    backupCount: 5
+    encoding: utf8
+
+  file_debug:
+    class: logging.handlers.RotatingFileHandler
+    level: DEBUG
+    formatter: verbose
+    filename: logs/django_debug.log
+    maxBytes: 5242880 # 5MB
+    backupCount: 3
+    encoding: utf8
+
+  file_db:
+    class: logging.handlers.RotatingFileHandler
+    level: DEBUG
+    formatter: verbose
+    filename: logs/django_db.log
+    maxBytes: 5242880 # 5MB
+    backupCount: 3
+    encoding: utf8
+
+  file_server:
+    class: logging.handlers.RotatingFileHandler
+    level: INFO
+    formatter: django_server
+    filename: logs/server.log
+    maxBytes: 10485760 # 10MB
+    backupCount: 5
+    encoding: utf8
+
+  file_celery:
+    class: logging.handlers.RotatingFileHandler
+    level: INFO
+    formatter: verbose
+    filename: logs/celery.log
+    maxBytes: 10485760 # 10MB
+    backupCount: 5
+    encoding: utf8
+
+loggers:
+  # Your main apps
+  early_access_api:
+    level: DEBUG
+    handlers: [console, file_general, file_errors, file_debug]
+    propagate: false
+
+  shared:
+    level: DEBUG
+    handlers: [console, file_general, file_errors, file_debug]
+    propagate: false
+
+  shared.member:
+    level: DEBUG
+    handlers: [console, file_general, file_errors, file_debug]
+    propagate: false
+
+  shared.notifications:
+    level: DEBUG
+    handlers: [console, file_general, file_errors, file_debug]
+    propagate: false
+
+  shared.transactions:
+    level: DEBUG
+    handlers: [console, file_general, file_errors, file_debug]
+    propagate: false
+
+  # KeyoRewards apps
+  keyorewards:
+    level: DEBUG
+    handlers: [console, file_general, file_errors, file_debug]
+    propagate: false
+
+  keyorewards.merchant:
+    level: DEBUG
+    handlers: [console, file_general, file_errors, file_debug]
+    propagate: false
+
+  keyorewards.manager:
+    level: DEBUG
+    handlers: [console, file_general, file_errors, file_debug]
+    propagate: false
+
+  keyorewards.surveys:
+    level: DEBUG
+    handlers: [console, file_general, file_errors, file_debug]
+    propagate: false
+
+  # KeyoConnect apps
+  keyoconnect:
+    level: DEBUG
+    handlers: [console, file_general, file_errors, file_debug]
+    propagate: false
+
+  keyoconnect.common:
+    level: DEBUG
+    handlers: [console, file_general, file_errors, file_debug]
+    propagate: false
+
+  keyoconnect.comments:
+    level: DEBUG
+    handlers: [console, file_general, file_errors, file_debug]
+    propagate: false
+
+  keyoconnect.posts:
+    level: DEBUG
+    handlers: [console, file_general, file_errors, file_debug]
+    propagate: false
+
+  keyoconnect.profiles:
+    level: DEBUG
+    handlers: [console, file_general, file_errors, file_debug]
+    propagate: false
+
+  keyoconnect.communities:
+    level: DEBUG
+    handlers: [console, file_general, file_errors, file_debug]
+    propagate: false
+
+  keyoconnect.articles:
+    level: DEBUG
+    handlers: [console, file_general, file_errors, file_debug]
+    propagate: false
+
+  # KeyoSparkle apps
+  keyosparkle:
+    level: DEBUG
+    handlers: [console, file_general, file_errors, file_debug]
+    propagate: false
+
+  keyosparkle.sparkleprofile:
+    level: DEBUG
+    handlers: [console, file_general, file_errors, file_debug]
+    propagate: false
+
+  # Django framework loggers
+  django:
+    level: INFO
+    handlers: [console, file_general]
+    propagate: false
+
+  django.request:
+    level: ERROR
+    handlers: [console, file_errors]
+    propagate: false
+
+  django.server:
+    level: INFO
+    handlers: [console, file_server]
+    propagate: false
+
+  django.db.backends:
+    level: WARNING # Set to DEBUG in development if you want to see SQL queries
+    handlers: [file_db]
+    propagate: false
+
+  django.security:
+    level: INFO
+    handlers: [console, file_errors]
+    propagate: false
+
+  django.channels:
+    level: INFO
+    handlers: [console, file_general, file_errors]
+    propagate: false
+
+  # Third-party loggers
+  uvicorn:
+    level: INFO
+    handlers: [console, file_server]
+    propagate: false
+
+  celery:
+    level: INFO
+    handlers: [console, file_celery, file_errors]
+    propagate: false
+
+  uvicorn.protocols.websockets:
+    level: INFO
+    handlers: [console, file_server]
+    propagate: false
+
+  ninja:
+    level: INFO
+    handlers: [console, file_general, file_errors]
+    propagate: false
+
+  corsheaders:
+    level: WARNING
+    handlers: [console, file_general]
+    propagate: false
+
+  storages:
+    level: INFO
+    handlers: [console, file_general, file_errors]
+    propagate: false
+
+  # Boto3/AWS S3 logging
+  boto3:
+    level: WARNING
+    handlers: [console, file_general]
+    propagate: false
+
+  botocore:
+    level: WARNING
+    handlers: [console, file_general]
+    propagate: false
+
+root:
+  level: WARNING
+  handlers: [console, file_general]

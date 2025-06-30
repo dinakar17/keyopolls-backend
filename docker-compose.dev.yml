@@ -1,0 +1,111 @@
+services:
+  # nginx-proxy for development
+  nginx-proxy:
+    image: nginxproxy/nginx-proxy:latest
+    ports:
+      - "80:80"
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - static_volume:/usr/share/nginx/html/static:ro
+      - media_volume:/usr/share/nginx/html/media:ro
+    environment:
+      - DEFAULT_HOST=django.localhost
+    restart: unless-stopped
+    networks:
+      - proxy-network
+
+  # Redis for caching and Celery broker
+  redis:
+    image: redis:latest
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend-network
+    profiles:
+      - redis
+
+  # Django ASGI web application
+  web:
+    build: .
+    volumes:
+      - .:/app # Mount code for development
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+      - logs_volume:/app/logs
+    env_file:
+      - .env
+    environment:
+      - VIRTUAL_HOST=django.localhost,localhost
+      - VIRTUAL_PORT=8000
+      - DEBUG=True
+    ports:
+      - "8000:8000" # Direct access for development
+    expose:
+      - "8000"
+    restart: unless-stopped
+    networks:
+      - proxy-network
+      - backend-network
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             daphne -b 0.0.0.0 -p 8000 early_access_api.asgi:application"
+
+  # Celery worker
+  celery:
+    build: .
+    command: celery -A early_access_api worker -l info
+    volumes:
+      - .:/app # Mount code for development
+      - logs_volume:/app/logs
+    env_file:
+      - .env
+    depends_on:
+      web:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend-network
+    profiles:
+      - redis
+
+  # Celery beat for scheduled tasks
+  celery-beat:
+    build: .
+    command: celery -A early_access_api beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    volumes:
+      - .:/app # Mount code for development
+      - logs_volume:/app/logs
+    env_file:
+      - .env
+    depends_on:
+      web:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend-network
+    profiles:
+      - redis
+
+networks:
+  proxy-network:
+    driver: bridge
+  backend-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+  static_volume:
+  media_volume:
+  logs_volume:

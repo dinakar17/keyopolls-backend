@@ -1,0 +1,132 @@
+services:
+  # nginx-proxy with SSL support
+  nginx-proxy:
+    image: nginxproxy/nginx-proxy:latest
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - nginx-certs:/etc/nginx/certs:ro
+      - nginx-vhosts:/etc/nginx/vhost.d
+      - nginx-html:/usr/share/nginx/html
+      - static_volume:/usr/share/nginx/html/static:ro
+      - media_volume:/usr/share/nginx/html/media:ro
+    environment:
+      - DEFAULT_HOST=api.keyo.in
+    restart: unless-stopped
+    networks:
+      - proxy-network
+    labels:
+      - "com.github.nginx-proxy.nginx"
+
+  # ACME companion for automatic SSL certificates
+  acme-companion:
+    image: nginxproxy/acme-companion:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - nginx-certs:/etc/nginx/certs:rw
+      - nginx-vhosts:/etc/nginx/vhost.d
+      - nginx-html:/usr/share/nginx/html
+      - acme:/etc/acme.sh
+    environment:
+      - DEFAULT_EMAIL=dinakar.chennupati17@gmail.com
+      - NGINX_PROXY_CONTAINER=nginx-proxy
+    depends_on:
+      - nginx-proxy
+    restart: unless-stopped
+    networks:
+      - proxy-network
+
+  # Redis for production
+  redis:
+    image: redis:latest
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - backend-network
+
+  # Django ASGI web application
+  web:
+    build: .
+    volumes:
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+      - logs_volume:/app/logs
+    env_file:
+      - .env.prod
+    environment:
+      - DEBUG=False
+      - VIRTUAL_HOST=api.keyo.in
+      - VIRTUAL_PORT=8000
+      - LETSENCRYPT_HOST=api.keyo.in
+      - LETSENCRYPT_EMAIL=dinakar.chennupati17@gmail.com
+    expose:
+      - "8000"
+    restart: unless-stopped
+    networks:
+      - proxy-network
+      - backend-network
+    depends_on:
+      - redis
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             daphne -b 0.0.0.0 -p 8000 early_access_api.asgi:application"
+
+  # Celery worker
+  celery:
+    build: .
+    command: celery -A early_access_api worker -l info
+    volumes:
+      - logs_volume:/app/logs
+    env_file:
+      - .env.prod
+    depends_on:
+      web:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend-network
+
+  # Celery beat for scheduled tasks
+  celery-beat:
+    build: .
+    command: celery -A early_access_api beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    volumes:
+      - logs_volume:/app/logs
+    env_file:
+      - .env.prod
+    depends_on:
+      web:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend-network
+
+networks:
+  proxy-network:
+    driver: bridge
+  backend-network:
+    driver: bridge
+
+volumes:
+  nginx-certs:
+  nginx-vhosts:
+  nginx-html:
+  acme:
+  redis_data:
+  static_volume:
+  media_volume:
+  logs_volume:
