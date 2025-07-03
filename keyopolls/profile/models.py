@@ -13,6 +13,26 @@ class PseudonymousProfile(models.Model):
     email = models.EmailField(unique=True)
     password_hash = models.CharField(max_length=255)
 
+    avatar = models.ImageField(
+        upload_to="avatars/",
+        blank=True,
+        null=True,
+        help_text="Profile picture for the user. Optional.",
+    )
+
+    banner = models.ImageField(
+        upload_to="banners/",
+        blank=True,
+        null=True,
+        help_text="Banner image for the profile. Optional.",
+    )
+
+    about = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Short bio or description for the profile. Optional.",
+    )
+
     # Aura scores
     aura_polls = models.IntegerField(default=0)
     aura_comments = models.IntegerField(default=0)
@@ -38,6 +58,11 @@ class PseudonymousProfile(models.Model):
     def total_aura(self):
         """Calculate total aura score"""
         return self.aura_polls + self.aura_comments
+
+    @property
+    def is_profile_complete(self):
+        """Check if profile is complete"""
+        return bool(self.username)
 
     def set_password(self, raw_password):
         """Hash and set password"""

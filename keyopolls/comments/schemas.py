@@ -126,7 +126,6 @@ class CommentOut(Schema):
         # Use get_author_info to get standardized author information
         author_info = get_author_info(
             profile=comment.profile,
-            anonymous_identifier=comment.anonymous_comment_identifier,
         )
 
         # Get nested replies only if include_replies is True

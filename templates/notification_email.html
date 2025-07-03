@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <title>{{ title }}</title>
+    <!--[if mso]>
+      <noscript>
+        <xml>
+          <o:OfficeDocumentSettings>
+            <o:PixelsPerInch>96</o:PixelsPerInch>
+          </o:OfficeDocumentSettings>
+        </xml>
+      </noscript>
+    <![endif]-->
+    <style>
+      /* Reset styles */
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Oxygen, Ubuntu, Cantarell, sans-serif;
+        line-height: 1.6;
+        color: #374151;
+        background-color: #f3f4f6;
+        margin: 0;
+        padding: 0;
+      }
+
+      .email-wrapper {
+        width: 100%;
+        background-color: #f3f4f6;
+        padding: 20px 0;
+      }
+
+      .email-container {
+        max-width: 600px;
+        margin: 0 auto;
+        background-color: #ffffff;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+      }
+
+      .header {
+        background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+        color: white;
+        padding: 30px 20px;
+        text-align: center;
+      }
+
+      .header h1 {
+        font-size: 24px;
+        font-weight: 600;
+        margin: 0;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+      }
+
+      .brand-section {
+        margin-bottom: 15px;
+      }
+
+      .brand-name {
+        font-size: 28px;
+        font-weight: bold;
+        letter-spacing: 1px;
+        margin-bottom: 5px;
+      }
+
+      .brand-tagline {
+        font-size: 14px;
+        opacity: 0.9;
+        font-weight: 500;
+      }
+
+      .notification-icon {
+        width: 48px;
+        height: 48px;
+        background-color: rgba(255, 255, 255, 0.2);
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 15px;
+        font-size: 24px;
+      }
+
+      .content {
+        padding: 40px 30px;
+      }
+
+      .greeting {
+        font-size: 18px;
+        font-weight: 500;
+        color: #1f2937;
+        margin-bottom: 20px;
+      }
+
+      .message {
+        font-size: 16px;
+        line-height: 1.7;
+        color: #4b5563;
+        margin-bottom: 30px;
+      }
+
+      .notification-meta {
+        background-color: #f9fafb;
+        border-left: 4px solid #2563eb;
+        padding: 16px 20px;
+        margin: 25px 0;
+        border-radius: 0 8px 8px 0;
+      }
+
+      .notification-type {
+        font-size: 12px;
+        text-transform: uppercase;
+        font-weight: 600;
+        color: #6b7280;
+        letter-spacing: 0.5px;
+        margin-bottom: 5px;
+      }
+
+      .notification-time {
+        font-size: 14px;
+        color: #9ca3af;
+      }
+
+      .cta-section {
+        text-align: center;
+        margin: 30px 0;
+      }
+
+      .cta-button {
+        display: inline-block;
+        background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+        color: white !important;
+        text-decoration: none;
+        padding: 14px 28px;
+        border-radius: 8px;
+        font-weight: 500;
+        font-size: 16px;
+        transition: all 0.3s ease;
+        box-shadow: 0 2px 4px rgba(37, 99, 235, 0.3);
+      }
+
+      .cta-button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(37, 99, 235, 0.4);
+      }
+
+      .divider {
+        height: 1px;
+        background-color: #e5e7eb;
+        margin: 30px 0;
+      }
+
+      .footer {
+        background-color: #f9fafb;
+        padding: 30px;
+        text-align: center;
+        border-top: 1px solid #e5e7eb;
+      }
+
+      .footer-content {
+        color: #6b7280;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+
+      .footer-links {
+        margin-top: 20px;
+      }
+
+      .footer-link {
+        color: #2563eb;
+        text-decoration: none;
+        margin: 0 15px;
+        font-weight: 500;
+      }
+
+      .footer-link:hover {
+        text-decoration: underline;
+      }
+
+      .app-name {
+        font-weight: 600;
+        color: #1f2937;
+      }
+
+      .unsubscribe {
+        font-size: 12px;
+        color: #9ca3af;
+        margin-top: 20px;
+      }
+
+      .unsubscribe a {
+        color: #9ca3af;
+        text-decoration: underline;
+      }
+
+      /* Responsive styles */
+      @media only screen and (max-width: 600px) {
+        .email-wrapper {
+          padding: 10px;
+        }
+
+        .email-container {
+          border-radius: 8px;
+        }
+
+        .header {
+          padding: 25px 15px;
+        }
+
+        .header h1 {
+          font-size: 20px;
+        }
+
+        .brand-name {
+          font-size: 24px;
+        }
+
+        .content {
+          padding: 25px 20px;
+        }
+
+        .footer {
+          padding: 25px 20px;
+        }
+
+        .cta-button {
+          padding: 12px 24px;
+          font-size: 15px;
+        }
+
+        .notification-meta {
+          margin: 20px -10px;
+          border-radius: 0;
+        }
+      }
+
+      /* Dark mode support */
+      @media (prefers-color-scheme: dark) {
+        .email-container {
+          background-color: #1f2937;
+        }
+
+        .content {
+          color: #e5e7eb;
+        }
+
+        .greeting {
+          color: #f3f4f6;
+        }
+
+        .message {
+          color: #d1d5db;
+        }
+
+        .notification-meta {
+          background-color: #374151;
+        }
+
+        .footer {
+          background-color: #374151;
+          border-top-color: #4b5563;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="email-wrapper">
+      <div class="email-container">
+        <!-- Header -->
+        <div class="header">
+          <div class="brand-section">
+            <div class="brand-name">Keyo</div>
+            <div class="brand-tagline">Where opinions matter</div>
+          </div>
+
+          <div class="notification-icon">
+            {% if notification_type == 'poll_comment' %}💬 {% elif
+            notification_type == 'comment_reply' %}↩️ {% elif notification_type
+            == 'poll_vote' %}🗳️ {% elif notification_type == 'poll_mention' %}📢
+            {% elif notification_type == 'aura_milestone' %}⚡ {% elif
+            notification_type == 'poll_milestone' %}🎉 {% elif notification_type
+            == 'new_poll' %}📊 {% elif notification_type == 'poll_results' %}📈
+            {% elif notification_type == 'featured_poll' %}🌟 {% elif
+            notification_type == 'verification' %}✅ {% elif notification_type
+            == 'welcome' %}🎊 {% else %}🔔 {% endif %}
+          </div>
+          <h1>{{ title }}</h1>
+        </div>
+
+        <!-- Content -->
+        <div class="content">
+          <div class="greeting">Hi {{ recipient_name }},</div>
+
+          <div class="message">{{ message }}</div>
+
+          {% if notification_type %}
+          <div class="notification-meta">
+            <div class="notification-type">
+              {% if notification_type == 'poll_comment' %}Poll Comment {% elif
+              notification_type == 'comment_reply' %}Comment Reply {% elif
+              notification_type == 'poll_vote' %}Poll Vote {% elif
+              notification_type == 'poll_mention' %}Poll Mention {% elif
+              notification_type == 'aura_milestone' %}Aura Milestone {% elif
+              notification_type == 'poll_milestone' %}Poll Milestone {% elif
+              notification_type == 'new_poll' %}New Poll {% elif
+              notification_type == 'poll_results' %}Poll Results {% elif
+              notification_type == 'featured_poll' %}Featured Poll {% elif
+              notification_type == 'verification' %}Account Verification {% elif
+              notification_type == 'welcome' %}Welcome Message {% else
+              %}Notification {% endif %}
+            </div>
+            <div class="notification-time">
+              Sent from
+              <span class="app-name">{{ app_name|default:"Keyo" }}</span>
+            </div>
+          </div>
+          {% endif %} {% if click_url %}
+          <div class="cta-section">
+            <a href="{{ click_url }}" class="cta-button">
+              {% if notification_type == 'poll_comment' or notification_type ==
+              'comment_reply' %} View Discussion {% elif notification_type ==
+              'poll_vote' %} See Poll Results {% elif notification_type ==
+              'poll_mention' %} View Poll {% elif notification_type ==
+              'aura_milestone' %} View Your Profile {% elif notification_type ==
+              'new_poll' or notification_type == 'featured_poll' %} Vote Now {%
+              elif notification_type == 'poll_results' %} See Results {% elif
+              notification_type == 'verification' %} Go to Settings {% else %}
+              View Details {% endif %}
+            </a>
+          </div>
+          {% endif %}
+
+          <div class="divider"></div>
+
+          <div style="font-size: 14px; color: #6b7280; text-align: center">
+            <p>
+              This notification was sent because you have email notifications
+              enabled for this type of activity.
+            </p>
+            <p style="margin-top: 10px">
+              <a
+                href="{{ app_url|default:'#' }}/settings/notifications"
+                style="color: #2563eb; text-decoration: none"
+              >
+                Manage your notification preferences
+              </a>
+            </p>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+          <div class="footer-content">
+            <p>
+              This is an automated message from
+              <span class="app-name">{{ app_name|default:"Keyo" }}</span>.
+            </p>
+
+            {% if app_url != '#' %}
+            <div class="footer-links">
+              <a href="{{ app_url }}" class="footer-link">Visit Website</a>
+              <a href="{{ app_url }}/about" class="footer-link">About Us</a>
+              <a href="{{ app_url }}/help" class="footer-link">Help Center</a>
+            </div>
+            {% endif %}
+
+            <div class="unsubscribe">
+              <p>
+                Don't want to receive these emails?
+                <a href="{{ app_url|default:'#' }}/settings/notifications"
+                  >Update preferences</a
+                >
+                or
+                <a href="{{ app_url|default:'#' }}/unsubscribe">unsubscribe</a>.
+              </p>
+              <p style="margin-top: 10px">
+                © {% now "Y" %} {{ app_name|default:"Keyo" }}. All rights
+                reserved.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

@@ -115,9 +115,14 @@ def OptionalPseudonymousJWTAuth(request: HttpRequest):
         request.auth = None
         return True
 
-    token = auth_header.split("Bearer ")[1]
+    token_part = auth_header.split("Bearer ", 1)
+    if len(token_part) < 2:
+        request.auth = None
+        return True
 
-    if token is None or token == "null":
+    token = token_part[1].strip()
+
+    if not token or token == "null" or token == "undefined":
         request.auth = None
         return True
 

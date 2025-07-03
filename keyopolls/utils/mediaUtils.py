@@ -47,7 +47,7 @@ def get_content_object(content_type: ContentTypeEnum, object_id: int):
     """Get the content object based on content type enum and ID"""
     # Map of content type enums to model classes
     content_type_map = {
-        ContentTypeEnum.POLL: "Post",
+        ContentTypeEnum.POLL: "Poll",
         ContentTypeEnum.COMMENT: "GenericComment",
     }
 

@@ -8,7 +8,11 @@ from ninja.errors import AuthenticationError, HttpError, HttpRequest, Validation
 from ninja.throttling import AnonRateThrottle, AuthRateThrottle
 
 from keyopolls.comments.api import router as comments_router
-from keyopolls.common import router as common_router
+from keyopolls.comments.api.search import router as comments_search_router
+from keyopolls.common.router import router as common_router
+from keyopolls.communities.api import router as communities_router
+from keyopolls.notifications.api import router as notifications_router
+from keyopolls.polls.api import router as polls_router
 from keyopolls.profile.api import router as profile_router
 from keyopolls.profile.middleware import AuthError
 
@@ -100,11 +104,10 @@ def generic_error_handler(request: HttpRequest, exc: Exception):
     return api.create_response(request, {"message": error_message}, status=500)
 
 
-try:
-    api.add_router("/user", profile_router)
-    api.add_router("/comments", comments_router)
-    api.add_router("/common", common_router)
-except ImportError as e:
-    print(f"Error importing routers: {e}")
-    logging.error(f"Failed to import routers: {e}")
-    raise ImportError("Failed to import API routers. Please check your imports.")
+api.add_router("/user", profile_router)
+api.add_router("/comments", comments_router)
+api.add_router("/comments/search", comments_search_router)
+api.add_router("/communities", communities_router)
+api.add_router("/common", common_router)
+api.add_router("/polls", polls_router)
+api.add_router("/notifications", notifications_router)

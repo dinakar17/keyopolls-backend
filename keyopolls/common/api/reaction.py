@@ -16,6 +16,7 @@ from keyopolls.common.schemas import (
     ShareResponseSchema,
 )
 from keyopolls.profile.middleware import OptionalPseudonymousJWTAuth
+from keyopolls.profile.models import PseudonymousProfile
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +117,7 @@ def toggle_reaction(
     - data: ReactionRequest containing reaction_type ("like" or "dislike")
     """
     # Get the authenticated pseudonymous profile
-    profile = request.auth
+    profile = request.auth if isinstance(request.auth, PseudonymousProfile) else None
 
     if not profile:
         return 401, {"message": "Authentication required"}
@@ -335,7 +336,9 @@ def get_content_object(content_type: str, object_id: int):
     response=ShareResponseSchema,
     auth=OptionalPseudonymousJWTAuth,
 )
-def share_content(request, content_type: str, object_id: int, data: ShareRequestSchema):
+def share_content(
+    request, content_type: ContentTypeEnum, object_id: int, data: ShareRequestSchema
+):
     """Record a share event for any content type using pseudonymous profile"""
 
     # Get the content object

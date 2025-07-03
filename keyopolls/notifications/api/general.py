@@ -65,9 +65,7 @@ def get_target_info(notification: Notification) -> Optional[dict]:
         # Get poll author info
         poll_author_info = None
         if hasattr(target, "profile") and target.profile:
-            poll_author_info = get_author_info(
-                profile=target.profile, anonymous_identifier=None
-            )
+            poll_author_info = get_author_info(profile=target)
 
         return {
             "type": "poll",
@@ -93,7 +91,7 @@ def get_target_info(notification: Notification) -> Optional[dict]:
         comment_author_info = None
         if hasattr(target, "profile") and target.profile:
             comment_author_info = get_author_info(
-                profile=target.profile,
+                profile=target,
             )
 
         # Get poll info if comment belongs to a poll
@@ -127,7 +125,7 @@ def get_target_info(notification: Notification) -> Optional[dict]:
 
     elif target_type == "pseudonymousprofile":
         # For profile targets, use get_author_info directly
-        profile_info = get_author_info(profile=target, anonymous_identifier=None)
+        profile_info = get_author_info(profile=target)
 
         return {
             "type": "profile",
@@ -613,7 +611,7 @@ def clear_all_notifications(
 
 
 @router.get(
-    "/notifications/summary",
+    "/notifications_summary",
     response={200: NotificationSummaryResponse, 400: Message},
     auth=OptionalPseudonymousJWTAuth,
 )

@@ -351,7 +351,7 @@ class Impression(models.Model):
             limit: Number of results to return
 
         Returns:
-            List of tuples: (object_id, impression_count)
+            List of tuples: (object_id, impressions_count)
         """
         since = timezone.now() - timedelta(days=days)
 
@@ -363,8 +363,8 @@ class Impression(models.Model):
         return list(
             cls.objects.filter(content_type=content_type, created_at__gte=since)
             .values("object_id")
-            .annotate(impression_count=models.Count("id"))
-            .order_by("-impression_count")[:limit]
+            .annotate(impressions_count=models.Count("id"))
+            .order_by("-impressions_count")[:limit]
         )
 
     @classmethod

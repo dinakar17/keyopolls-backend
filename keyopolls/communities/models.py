@@ -1,5 +1,8 @@
+from django.contrib.contenttypes.models import ContentType
 from django.db import models
 from django.utils import timezone
+
+from keyopolls.common.models import TaggedItem
 
 
 class Community(models.Model):
@@ -15,9 +18,41 @@ class Community(models.Model):
     name = models.CharField(max_length=100, unique=True)
     description = models.TextField(blank=True)
 
+    avatar = models.ImageField(
+        upload_to="community_avatars/",
+        blank=True,
+        null=True,
+        help_text="Community avatar image",
+    )
+
+    banner = models.ImageField(
+        upload_to="community_banners/",
+        blank=True,
+        null=True,
+        help_text="Community banner image",
+    )
+
     # Community settings
     community_type = models.CharField(
         max_length=20, choices=COMMUNITY_TYPE_CHOICES, default="public"
+    )
+
+    # Category relationship
+    category = models.ForeignKey(
+        "common.Category",
+        on_delete=models.CASCADE,
+        related_name="communities",
+        null=True,
+        blank=True,
+    )
+
+    rules = models.JSONField(
+        default=list,
+        blank=True,
+        help_text=(
+            "List of community rules. Each rule should be between "
+            "10 and 280 characters."
+        ),
     )
 
     # Creator
@@ -47,6 +82,7 @@ class Community(models.Model):
             models.Index(fields=["community_type", "-created_at"]),
             models.Index(fields=["-member_count"]),
             models.Index(fields=["is_active", "-created_at"]),
+            models.Index(fields=["category", "-created_at"]),
         ]
         ordering = ["-created_at"]
         verbose_name_plural = "Communities"
@@ -76,6 +112,13 @@ class Community(models.Model):
             return False
         return True
 
+    def get_tags(self):
+        """Get all tags associated with this community"""
+        community_content_type = ContentType.objects.get_for_model(Community)
+        return TaggedItem.objects.filter(
+            content_type=community_content_type, object_id=self.id
+        ).select_related("tag")
+
 
 class CommunityMembership(models.Model):
     """Community membership - simple and efficient"""
@@ -99,7 +142,7 @@ class CommunityMembership(models.Model):
         Community, on_delete=models.CASCADE, related_name="memberships"
     )
     profile = models.ForeignKey(
-        "profile.PseudonymousProfile",  # Replace with your app name
+        "profile.PseudonymousProfile",
         on_delete=models.CASCADE,
         related_name="community_memberships",
     )

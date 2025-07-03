@@ -146,7 +146,7 @@ def search_comments(
     start_time = time.time()
 
     # Extract authentication info from OptionalPseudonymousJWTAuth
-    profile = request.auth if request.auth else None
+    profile = request.auth if isinstance(request.auth, PseudonymousProfile) else None
 
     # Validate parameters
     if q and len(q.strip()) < 2:

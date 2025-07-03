@@ -231,7 +231,7 @@ class PollFollow(models.Model):
 
     # Poll being followed
     poll = models.ForeignKey(
-        "profile.Poll",
+        "polls.Poll",
         on_delete=models.CASCADE,
         related_name="followers",
     )
@@ -272,7 +272,7 @@ class CommentFollow(models.Model):
 
     # Comment being followed
     comment = models.ForeignKey(
-        "profile.GenericComment",
+        "comments.GenericComment",
         on_delete=models.CASCADE,
         related_name="followers",
     )

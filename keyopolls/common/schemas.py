@@ -8,6 +8,23 @@ from ninja import ModelSchema, Schema
 from keyopolls.common.models import UploadedImage
 
 
+class Message(Schema):
+    """Schema for a simple message response"""
+
+    message: str
+
+
+class PaginationSchema(Schema):
+    current_page: int
+    total_pages: int
+    total_count: int
+    has_next: bool
+    has_previous: bool
+    page_size: int
+    next_page: Optional[int] = None
+    previous_page: Optional[int] = None
+
+
 class MediaSchema(Schema):
     """Schema for media attachments"""
 
@@ -19,8 +36,8 @@ class MediaSchema(Schema):
     height: Optional[int] = None
     alt_text: Optional[str] = None
     duration: Optional[float] = None
-    order: int
-    created_at: str
+    order: Optional[int] = None
+    created_at: Optional[str] = None
 
 
 class LinkSchema(Schema):
@@ -135,8 +152,8 @@ class FollowRequest(Schema):
 class ContentTypeEnum(str, Enum):
     """Enum for valid content types"""
 
-    POLL = "post"
-    COMMENT = "comment"
+    POLL = "Poll"
+    COMMENT = "GenericComment"
 
 
 """
@@ -157,6 +174,12 @@ class ToggleBookmarkResponseSchema(Schema):
     bookmarked: bool
     message: str
     bookmark_id: Optional[int] = None
+
+
+class ProfileType(str, Enum):
+    """Enum for profile types"""
+
+    PSEUDONYMOUS = "pseudonymous"
 
 
 """

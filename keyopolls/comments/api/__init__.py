@@ -35,7 +35,10 @@ from keyopolls.common.schemas import ContentTypeEnum
 #     notify_post_comment,
 #     notify_replies_milestone,
 # )
-from keyopolls.profile.middleware import OptionalPseudonymousJWTAuth
+from keyopolls.profile.middleware import (
+    OptionalPseudonymousJWTAuth,
+    PseudonymousJWTAuth,
+)
 from keyopolls.utils import (
     create_link_object,
     create_media_object,
@@ -59,7 +62,7 @@ CUD operations for Comments
 @router.post(
     "/{content_type}/{object_id}/comments",
     response={201: CommentResponse, 400: Message, 404: Message},
-    auth=OptionalPseudonymousJWTAuth,
+    auth=PseudonymousJWTAuth(),
 )
 def create_comment(
     request: HttpRequest,
@@ -231,7 +234,7 @@ def create_comment(
 @router.post(
     "/comments/{comment_id}",
     response={200: CommentResponse, 400: Message, 403: Message, 404: Message},
-    auth=OptionalPseudonymousJWTAuth,
+    auth=PseudonymousJWTAuth(),
 )
 def update_comment(
     request: HttpRequest,
@@ -323,7 +326,7 @@ def update_comment(
 @router.delete(
     "/comments/{comment_id}",
     response={200: CommentDeleteSchema, 400: Message, 403: Message, 404: Message},
-    auth=OptionalPseudonymousJWTAuth,
+    auth=PseudonymousJWTAuth(),
 )
 def delete_comment(request: HttpRequest, comment_id: int):
     """Delete a comment using pseudonymous profile"""

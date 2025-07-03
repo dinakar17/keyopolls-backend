@@ -28,6 +28,7 @@ def get_author_info(profile: PseudonymousProfile) -> Dict[str, Any]:
             "id": 0,
             "username": "Unknown",
             "display_name": "Unknown User",
+            "avatar": None,
             "total_aura": 0,
         }
 
@@ -35,6 +36,7 @@ def get_author_info(profile: PseudonymousProfile) -> Dict[str, Any]:
         "id": profile.id,
         "username": profile.username,
         "display_name": profile.display_name,
+        "avatar": profile.avatar.url if profile.avatar else None,
         "total_aura": profile.total_aura,
     }
 
@@ -43,7 +45,7 @@ def get_content_object(content_type: ContentTypeEnum, object_id: int):
     """Get the content object based on content type enum and ID"""
     # Map of content type enums to model classes
     content_type_map = {
-        ContentTypeEnum.POLL: "Post",
+        ContentTypeEnum.POLL: "Poll",
         ContentTypeEnum.COMMENT: "GenericComment",
     }
 
