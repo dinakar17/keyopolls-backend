@@ -12,7 +12,6 @@ from django.http import HttpRequest
 from django.utils import timezone
 from ninja import Field, File, Router, Schema, UploadedFile
 from ninja.errors import ValidationError
-from shared.schemas import Message
 
 from keyopolls.comments.models import GenericComment
 from keyopolls.comments.schemas import (
@@ -23,7 +22,7 @@ from keyopolls.comments.schemas import (
     CommentUpdateSchema,
     PaginatedCommentResponse,
 )
-from keyopolls.common.schemas import ContentTypeEnum
+from keyopolls.common.schemas import ContentTypeEnum, Message
 
 # Commented out notification imports - will update later
 # from keyopolls.connect_notifications.notification_utils import (

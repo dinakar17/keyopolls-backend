@@ -84,48 +84,7 @@ handlers:
 
 loggers:
   # Your main apps
-  early_access_api:
-    level: DEBUG
-    handlers: [console, file_general, file_errors, file_debug]
-    propagate: false
-
-  shared:
-    level: DEBUG
-    handlers: [console, file_general, file_errors, file_debug]
-    propagate: false
-
-  shared.member:
-    level: DEBUG
-    handlers: [console, file_general, file_errors, file_debug]
-    propagate: false
-
-  shared.notifications:
-    level: DEBUG
-    handlers: [console, file_general, file_errors, file_debug]
-    propagate: false
-
-  shared.transactions:
-    level: DEBUG
-    handlers: [console, file_general, file_errors, file_debug]
-    propagate: false
-
-  # KeyoRewards apps
-  keyorewards:
-    level: DEBUG
-    handlers: [console, file_general, file_errors, file_debug]
-    propagate: false
-
-  keyorewards.merchant:
-    level: DEBUG
-    handlers: [console, file_general, file_errors, file_debug]
-    propagate: false
-
-  keyorewards.manager:
-    level: DEBUG
-    handlers: [console, file_general, file_errors, file_debug]
-    propagate: false
-
-  keyorewards.surveys:
+  core:
     level: DEBUG
     handlers: [console, file_general, file_errors, file_debug]
     propagate: false
@@ -157,22 +116,6 @@ loggers:
     propagate: false
 
   keyopolls.communities:
-    level: DEBUG
-    handlers: [console, file_general, file_errors, file_debug]
-    propagate: false
-
-  keyopolls.articles:
-    level: DEBUG
-    handlers: [console, file_general, file_errors, file_debug]
-    propagate: false
-
-  # KeyoSparkle apps
-  keyosparkle:
-    level: DEBUG
-    handlers: [console, file_general, file_errors, file_debug]
-    propagate: false
-
-  keyosparkle.sparkleprofile:
     level: DEBUG
     handlers: [console, file_general, file_errors, file_debug]
     propagate: false

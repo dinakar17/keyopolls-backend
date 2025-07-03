@@ -1,8 +1,7 @@
 import logging
 from typing import Dict, List, Optional
 
-from shared.notifications.firebase import FirebaseService
-
+from keyopolls.notifications.firebase import FirebaseService
 from keyopolls.notifications.models import FCMDevice, NotificationPreference
 from keyopolls.profile.models import PseudonymousProfile
 

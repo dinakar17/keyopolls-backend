@@ -7,7 +7,6 @@ from django.core.paginator import Paginator
 from django.db.models import Q
 from django.http import HttpRequest
 from ninja import Field, Router, Schema
-from shared.schemas import Message
 
 from keyopolls.comments.api import (
     CommentSortEnum,
@@ -17,7 +16,7 @@ from keyopolls.comments.api import (
 )
 from keyopolls.comments.models import GenericComment
 from keyopolls.common.models import Reaction
-from keyopolls.common.schemas import ContentTypeEnum
+from keyopolls.common.schemas import ContentTypeEnum, Message
 from keyopolls.polls.models import Poll
 from keyopolls.profile.middleware import (
     OptionalPseudonymousJWTAuth,

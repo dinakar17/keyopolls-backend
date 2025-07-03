@@ -5,11 +5,11 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.http import HttpRequest
 from django.shortcuts import get_object_or_404
 from ninja import Router
-from shared.schemas import Message
 
 from keyopolls.common.models import Reaction, Share
 from keyopolls.common.schemas import (
     ContentTypeEnum,
+    Message,
     ReactionRequest,
     ReactionResponse,
     ShareRequestSchema,

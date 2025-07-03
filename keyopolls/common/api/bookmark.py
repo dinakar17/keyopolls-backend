@@ -2,11 +2,11 @@ from django.apps import apps
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import HttpRequest
 from ninja import Router
-from shared.schemas import Message
 
 from keyopolls.common.models import Bookmark, BookmarkFolder
 from keyopolls.common.schemas import (
     ContentTypeEnum,
+    Message,
     ToggleBookmarkResponseSchema,
     ToggleBookmarkSchema,
 )

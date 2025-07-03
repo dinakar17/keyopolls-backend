@@ -1,8 +1,8 @@
 from typing import Dict, List, Optional
 
 from ninja import Schema
-from shared.schemas import PaginationSchema
 
+from keyopolls.common.schemas import PaginationSchema
 from keyopolls.profile.schemas import AuthorSchema
 
 

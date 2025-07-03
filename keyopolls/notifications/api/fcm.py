@@ -3,8 +3,8 @@ from typing import List, Optional
 from django.http import HttpRequest
 from django.utils import timezone
 from ninja import Query, Router
-from shared.schemas import Message
 
+from keyopolls.common.schemas import Message
 from keyopolls.notifications.fcm_services import FCMService
 from keyopolls.notifications.models import NotificationPreference, NotificationType
 from keyopolls.notifications.schemas import (
