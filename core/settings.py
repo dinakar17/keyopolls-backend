@@ -80,6 +80,8 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
+    # Make sure daphne comes before django.contrib.staticfiles
+    "daphne",
     "django.contrib.staticfiles",
     # Third-party apps
     "corsheaders",
@@ -161,8 +163,7 @@ else:
 
 DATABASES = {
     "default": dj_database_url.parse(
-        "postgres://postgres:12345@localhost:5432/keyopolls"
-        # config("DATABASE_URL", default="sqlite:///db.sqlite3"),
+        config("DATABASE_URL", default="sqlite:///db.sqlite3"),
     )
 }
 

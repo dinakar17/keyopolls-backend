@@ -182,7 +182,7 @@ def create_poll(
 
         if daily_poll_count >= 4:
             return 400, {
-                "message": "You can only create 3 polls per day in this community"
+                "message": "You can only create 4 polls per day in this community"
             }
 
         # Use database transaction
