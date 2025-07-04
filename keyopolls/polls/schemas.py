@@ -1,6 +1,8 @@
 from datetime import datetime
 from typing import Dict, List, Optional
 
+from django.db import transaction
+from django.utils import timezone
 from ninja import Schema
 
 from keyopolls.common.models import Bookmark, Reaction
@@ -250,8 +252,57 @@ class PollDetails(Schema):
     updated_at: datetime
 
     @staticmethod
+    def resolve_list(polls, profile=None):
+        """
+        Resolve a list of polls, updating expired ones in bulk first.
+        Use this in your list endpoint for better performance.
+        """
+        # Bulk update expired polls first
+        PollDetails._bulk_update_expired_polls(polls)
+
+        # Then resolve each poll
+        return [PollDetails.resolve(poll, profile) for poll in polls]
+
+    @staticmethod
+    def _bulk_update_expired_polls(polls):
+        """
+        Update expired polls in bulk for better performance.
+        """
+        now = timezone.now()
+
+        # Get IDs of polls that need to be expired
+        expired_poll_ids = [
+            poll.id
+            for poll in polls
+            if (poll.status == "active" and poll.expires_at and poll.expires_at <= now)
+        ]
+
+        if expired_poll_ids:
+            try:
+                # Bulk update expired polls
+                Poll.objects.filter(
+                    id__in=expired_poll_ids,
+                    status="active",  # Double-check they're still active
+                ).update(status="expired", updated_at=now)
+
+                # Update the in-memory objects to reflect the change
+                for poll in polls:
+                    if poll.id in expired_poll_ids and poll.status == "active":
+                        poll.status = "expired"
+                        poll.updated_at = now
+
+            except Exception as e:
+                import logging
+
+                logger = logging.getLogger(__name__)
+                logger.error(f"Error bulk updating expired polls: {e}")
+
+    @staticmethod
     def resolve(poll: Poll, profile: Optional[PseudonymousProfile] = None):
         """Resolve poll data with optional user context"""
+
+        # Check and update expiration status
+        poll = PollDetails._check_and_update_expiration(poll)
 
         # Initialize user-specific fields
         user_can_vote = False
@@ -419,6 +470,31 @@ class PollDetails(Schema):
             "created_at": poll.created_at,
             "updated_at": poll.updated_at,
         }
+
+    @staticmethod
+    def _check_and_update_expiration(poll):
+        """Single poll expiration check and update"""
+        now = timezone.now()
+
+        if poll.status == "active" and poll.expires_at and poll.expires_at <= now:
+
+            try:
+                with transaction.atomic():
+                    poll = Poll.objects.select_for_update().get(id=poll.id)
+                    if (
+                        poll.status == "active"
+                        and poll.expires_at
+                        and poll.expires_at <= now
+                    ):
+                        poll.status = "expired"
+                        poll.save(update_fields=["status", "updated_at"])
+            except Exception as e:
+                import logging
+
+                logger = logging.getLogger(__name__)
+                logger.error(f"Error updating poll {poll.id} expiration: {e}")
+
+        return poll
 
 
 class PollListResponseSchema(Schema):

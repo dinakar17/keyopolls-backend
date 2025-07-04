@@ -170,7 +170,7 @@ def update_community(
         community.description = data.description.strip()
 
     if data.rules:
-        community.rules = data.rules.strip()
+        community.rules = data.rules
 
     if avatar:
         if avatar.size > 5 * 1024 * 1024:  # Limit to 5MB

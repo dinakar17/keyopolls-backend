@@ -248,7 +248,7 @@ def list_polls(
         None, description="Filter by poll type (single, multiple, ranking)"
     ),
     status: Optional[List[str]] = Query(
-        ["active"],
+        None,
         description=(
             "Filter by status (active, closed, archived, draft, "
             "pending_moderation, rejected). Can provide multiple values."
@@ -300,29 +300,25 @@ def list_polls(
                 "message": f"Invalid poll_type. Must be: {', '.join(valid_poll_types)}"
             }
 
-        # UPDATED: Validate status list
         valid_statuses = [
             "active",
             "closed",
+            "expired",
             "archived",
             "draft",
             "pending_moderation",
             "rejected",
         ]
 
-        # Handle case where status might be None or empty
-        if not status:
-            status = ["active"]
-
-        # Validate each status in the list
-        invalid_statuses = [s for s in status if s not in valid_statuses]
-        if invalid_statuses:
-            return 400, {
-                "message": (
-                    f"Invalid status(es): {', '.join(invalid_statuses)}. "
-                    f"Must be: {', '.join(valid_statuses)}"
-                )
-            }
+        if status:
+            invalid_statuses = [s for s in status if s not in valid_statuses]
+            if invalid_statuses:
+                return 400, {
+                    "message": (
+                        f"Invalid status(es): {', '.join(invalid_statuses)}. "
+                        f"Must be: {', '.join(valid_statuses)}"
+                    )
+                }
 
         valid_sorts = ["newest", "oldest", "most_votes", "most_popular", "trending"]
         if sort not in valid_sorts:
@@ -343,20 +339,48 @@ def list_polls(
         # Track applied filters for debugging
         applied_filters = {}
 
-        # === SPECIAL CATEGORY HANDLING ===
+        # === DETERMINE DEFAULT STATUS FILTERS ===
+        if not status:
+            if my_polls:
+                # When viewing own polls, show all statuses by default
+                status = [
+                    "active",
+                    "closed",
+                    "expired",
+                    "archived",
+                    "draft",
+                    "pending_moderation",
+                    "rejected",
+                ]
+                applied_filters["default_my_polls_all_statuses"] = True
+            elif author_id and author_id == (profile.id if profile else None):
+                # When viewing own polls via author_id, show all statuses
+                status = [
+                    "active",
+                    "closed",
+                    "expired",
+                    "archived",
+                    "draft",
+                    "pending_moderation",
+                    "rejected",
+                ]
+                applied_filters["default_own_author_all_statuses"] = True
+            else:
+                # For public feeds, show active, closed, and expired by default
+                status = ["active", "closed", "expired"]
+                applied_filters["default_public_statuses"] = True
+
+        # === HANDLE SPECIAL CATEGORY: FOR-YOU FEED ===
         if category_id == 1:  # "For You" personalized feed
             applied_filters["for_you_feed"] = True
 
             if not profile:
-                # Unauthenticated users get popular public polls (ACTIVE + CLOSED)
+                # Unauthenticated users get popular public polls
                 polls = (
                     polls.filter(
                         community__community_type="public",
                         community__is_active=True,
-                        status__in=[
-                            "active",
-                            "closed",
-                        ],  # Show active and closed polls in public feeds
+                        status__in=["active", "closed"],
                     )
                     .annotate(
                         popularity_score=models.F("total_votes")
@@ -367,185 +391,175 @@ def list_polls(
                 applied_filters["unauthenticated_feed"] = True
             else:
                 # Authenticated users get personalized feed
-                # Get user's communities
                 user_community_ids = CommunityMembership.objects.filter(
                     profile=profile, status="active"
                 ).values_list("community_id", flat=True)
 
-                # Get categories user interacts with (from their community memberships)
                 user_category_ids = Community.objects.filter(
                     id__in=user_community_ids
                 ).values_list("category_id", flat=True)
 
-                # Personalized algorithm:
-                # user communities + similar categories + trending
                 polls = (
                     polls.filter(
-                        models.Q(
-                            community_id__in=user_community_ids
-                        )  # User's communities
+                        models.Q(community_id__in=user_community_ids)
                         | models.Q(
                             community__category_id__in=user_category_ids,
                             community__community_type="public",
-                        )  # Similar categories
+                        )
                         | models.Q(
                             community__community_type="public", total_votes__gte=10
-                        )  # Trending public polls
+                        )
                     )
-                    .filter(
-                        community__is_active=True, status__in=["active", "closed"]
-                    )  # Active and closed polls
+                    .filter(community__is_active=True, status__in=["active", "closed"])
                     .distinct()
                 )
                 applied_filters["personalized_feed"] = True
 
-        # === CORE FILTERING ===
-        elif category_id and category_id != 1:
-            # Filter by specific category
-            try:
-                category = Category.objects.get(id=category_id)
-                polls = polls.filter(community__category=category)
-                applied_filters["category_id"] = category_id
-            except Category.DoesNotExist:
-                return 400, {"message": "Category not found"}
+        else:
+            # === STANDARD FILTERING (NOT FOR-YOU FEED) ===
 
-        # Community filter
-        if community_id:
-            try:
-                community = Community.objects.get(id=community_id, is_active=True)
+            # Category filter
+            if category_id:
+                try:
+                    category = Category.objects.get(id=category_id)
+                    polls = polls.filter(community__category=category)
+                    applied_filters["category_id"] = category_id
+                except Category.DoesNotExist:
+                    return 400, {"message": "Category not found"}
 
-                # Check if user can view this community's polls
-                if community.community_type == "private" and profile:
-                    try:
-                        membership = community.memberships.get(profile=profile)
-                        if not membership.is_active_member:
+            # Community filter
+            if community_id:
+                try:
+                    community = Community.objects.get(id=community_id, is_active=True)
+
+                    # Check access permissions for private communities
+                    if community.community_type == "private":
+                        if not profile:
+                            return 400, {
+                                "message": (
+                                    "Authentication required to view this community"
+                                )
+                            }
+
+                        try:
+                            membership = community.memberships.get(profile=profile)
+                            if not membership.is_active_member:
+                                return 400, {
+                                    "message": "You don't have access to this community"
+                                }
+                        except CommunityMembership.DoesNotExist:
                             return 400, {
                                 "message": "You don't have access to this community"
                             }
-                    except CommunityMembership.DoesNotExist:
-                        return 400, {
-                            "message": "You don't have access to this community"
-                        }
-                elif community.community_type == "private" and not profile:
-                    return 400, {
-                        "message": "Authentication required to view this community"
-                    }
 
-                polls = polls.filter(community=community)
-                applied_filters["community_id"] = community_id
-            except Community.DoesNotExist:
-                return 400, {"message": "Community not found"}
+                    polls = polls.filter(community=community)
+                    applied_filters["community_id"] = community_id
+                except Community.DoesNotExist:
+                    return 400, {"message": "Community not found"}
 
-        # User-specific filters
-        if my_polls and profile:
-            polls = polls.filter(profile=profile)
-            applied_filters["my_polls"] = True
-            # UPDATED: When viewing own polls, use provided status filters
-            # If only "active" is provided, show all statuses for own polls
-            if status == ["active"]:
-                # Default behavior: show all statuses for own polls
-                status = [
-                    "active",
-                    "closed",
-                    "pending_moderation",
-                    "rejected",
-                    "draft",
-                    "archived",
-                ]
-                applied_filters["my_polls_all_statuses"] = True
-        elif not my_polls and category_id != 1:
-            # UPDATED: For non-personal feeds, use provided status
-            # or default to active + closed
-            if status == ["active"]:
-                status = ["active", "closed"]
-                applied_filters["default_active_and_closed"] = True
+            # === USER-SPECIFIC FILTERS ===
+            if my_polls and profile:
+                polls = polls.filter(profile=profile)
+                applied_filters["my_polls"] = True
 
-        if my_communities and profile:
-            user_community_ids = CommunityMembership.objects.filter(
-                profile=profile, status="active"
-            ).values_list("community_id", flat=True)
-            polls = polls.filter(community_id__in=user_community_ids)
-            applied_filters["my_communities"] = True
+            if my_communities and profile:
+                user_community_ids = CommunityMembership.objects.filter(
+                    profile=profile, status="active"
+                ).values_list("community_id", flat=True)
+                polls = polls.filter(community_id__in=user_community_ids)
+                applied_filters["my_communities"] = True
 
-        # Voting status filter
-        if voted is not None and profile:
-            if voted:
-                # User has voted - get polls where user has votes
+            if author_id:
+                # Check if viewing own polls or someone else's
+                if author_id == (profile.id if profile else None):
+                    # Viewing own polls - already handled in status defaults above
+                    applied_filters["viewing_own_polls"] = True
+                else:
+                    # Viewing someone else's polls - filter sensitive statuses unless
+                    #  staff
+                    if profile and hasattr(profile, "is_staff") and profile.is_staff:
+                        # Staff can see all statuses
+                        applied_filters["staff_viewing_author"] = True
+                    else:
+                        # Regular users can only see public statuses from others
+                        status = [
+                            s
+                            for s in status
+                            if s not in ["draft", "pending_moderation", "rejected"]
+                        ]
+                        if not status:
+                            status = ["active", "closed"]
+                        applied_filters["filtered_other_author_statuses"] = True
+
+                polls = polls.filter(profile_id=author_id)
+                applied_filters["author_id"] = author_id
+
+            # Voting status filter
+            if voted is not None and profile:
                 voted_poll_ids = (
                     PollVote.objects.filter(profile=profile)
                     .values_list("poll_id", flat=True)
                     .distinct()
                 )
-                polls = polls.filter(id__in=voted_poll_ids)
-                applied_filters["voted"] = True
-            else:
-                # User hasn't voted - exclude polls where user has votes
-                voted_poll_ids = (
-                    PollVote.objects.filter(profile=profile)
-                    .values_list("poll_id", flat=True)
-                    .distinct()
-                )
-                polls = polls.exclude(id__in=voted_poll_ids)
-                applied_filters["not_voted"] = True
+
+                if voted:
+                    polls = polls.filter(id__in=voted_poll_ids)
+                    applied_filters["voted"] = True
+                else:
+                    polls = polls.exclude(id__in=voted_poll_ids)
+                    applied_filters["not_voted"] = True
+
+            # === APPLY STATUS FILTER ===
+            # Check for sensitive statuses that require special permissions
+            sensitive_statuses = ["pending_moderation", "rejected"]
+            has_sensitive_status = any(s in sensitive_statuses for s in status)
+
+            if has_sensitive_status and not profile:
+                return 400, {
+                    "message": "Authentication required to view moderation statuses"
+                }
+
+            # Apply status filtering with permission checks
+            if has_sensitive_status and profile:
+                # Only allow viewing sensitive statuses for own polls or staff
+                if not (
+                    my_polls
+                    or author_id == profile.id
+                    or (hasattr(profile, "is_staff") and profile.is_staff)
+                ):
+                    # Remove sensitive statuses for non-owners/non-staff
+                    status = [s for s in status if s not in sensitive_statuses]
+                    applied_filters["filtered_sensitive_statuses"] = True
+
+            if status:
+                polls = polls.filter(status__in=status)
+                applied_filters["status"] = status
+
+            # === PRIVACY FILTERING ===
+            if not my_communities:
+                if not profile:
+                    # Non-authenticated users see only public community polls
+                    polls = polls.filter(community__community_type="public")
+                    applied_filters["public_only"] = True
+                else:
+                    # Authenticated users see public + restricted + their private
+                    #  community polls
+                    user_private_community_ids = CommunityMembership.objects.filter(
+                        profile=profile,
+                        status="active",
+                        community__community_type="private",
+                    ).values_list("community_id", flat=True)
+
+                    polls = polls.filter(
+                        models.Q(community__community_type__in=["public", "restricted"])
+                        | models.Q(community_id__in=user_private_community_ids)
+                    )
+                    applied_filters["privacy_filtered"] = True
 
         # === ADDITIONAL FILTERS ===
         if poll_type:
             polls = polls.filter(poll_type=poll_type)
             applied_filters["poll_type"] = poll_type
-
-        # UPDATED: Enhanced status filtering logic with multiple statuses
-        if status and category_id != 1:  # For-you feed handles status internally
-            # Check for sensitive statuses
-            sensitive_statuses = ["pending_moderation", "rejected"]
-            has_sensitive_status = any(s in sensitive_statuses for s in status)
-
-            if has_sensitive_status:
-                if not profile:
-                    return 400, {
-                        "message": "Authentication required to view moderation statuses"
-                    }
-
-                # Only allow users to see their own pending/rejected polls
-                # Unless they're staff/moderators
-                if not (hasattr(profile, "is_staff") and profile.is_staff):
-                    # Filter out sensitive statuses for non-owners
-                    if not my_polls:
-                        status = [s for s in status if s not in sensitive_statuses]
-                        applied_filters["filtered_sensitive_statuses"] = True
-                    else:
-                        applied_filters["own_moderation_polls"] = True
-
-            # Apply status filter
-            if status:  # Only apply if there are still statuses left after filtering
-                polls = polls.filter(status__in=status)
-                applied_filters["status"] = status
-
-        if author_id:
-            # UPDATED: When viewing specific author's polls, apply visibility rules
-            if author_id != (profile.id if profile else None):
-                # Viewing someone else's polls - filter out sensitive statuses
-                # unless the viewer is staff
-                if not (profile and hasattr(profile, "is_staff") and profile.is_staff):
-                    # Remove sensitive statuses from the filter
-                    safe_statuses = [
-                        s
-                        for s in status
-                        if s not in ["pending_moderation", "rejected", "draft"]
-                    ]
-                    if not safe_statuses:
-                        safe_statuses = ["active", "closed"]
-                    polls = polls.filter(status__in=safe_statuses)
-                    applied_filters["author_safe_statuses"] = safe_statuses
-
-            polls = polls.filter(profile_id=author_id)
-            applied_filters["author_id"] = author_id
-
-        if tag:
-            # If you have a tagging system for polls, update this section
-            # For now, assuming polls might be tagged through their communities
-            # You can remove this section if polls don't have direct tags
-            pass  # Remove this filter if polls don't support tags directly
-            # applied_filters["tag"] = tag
 
         if min_aura:
             polls = polls.filter(requires_aura__gte=min_aura)
@@ -561,7 +575,7 @@ def list_polls(
             )
             applied_filters["exclude_expired"] = True
 
-        # === SEARCH FUNCTIONALITY ===
+        # Search functionality
         if search:
             search_term = search.strip()
             polls = polls.filter(
@@ -570,26 +584,6 @@ def list_polls(
             )
             applied_filters["search"] = search_term
 
-        # === PRIVACY FILTERING ===
-        if not my_communities and category_id != 1:  # Skip for personalized feeds
-            if not profile:
-                # Non-authenticated users see only public community polls
-                polls = polls.filter(community__community_type="public")
-                applied_filters["public_only"] = True
-            else:
-                # Authenticated users see public + restricted + their private
-                # community polls
-                user_private_community_ids = CommunityMembership.objects.filter(
-                    profile=profile,
-                    status="active",
-                    community__community_type="private",
-                ).values_list("community_id", flat=True)
-
-                polls = polls.filter(
-                    models.Q(community__community_type__in=["public", "restricted"])
-                    | models.Q(community_id__in=user_private_community_ids)
-                )
-
         # === SORTING ===
         if category_id != 1:  # For-you feed has custom sorting
             sort_mapping = {
@@ -597,11 +591,10 @@ def list_polls(
                 "oldest": "created_at",
                 "most_votes": "-total_votes",
                 "most_popular": "-total_voters",
-                "trending": None,  # Special handling below
+                "trending": None,
             }
 
             if sort == "trending":
-                # Trending algorithm: recent polls with high engagement
                 from datetime import timedelta
 
                 from django.utils import timezone
@@ -641,7 +634,6 @@ def list_polls(
         try:
             page_obj = paginator.page(page)
         except Exception:
-            # If page doesn't exist, return empty results
             page_obj = (
                 paginator.page(paginator.num_pages) if paginator.num_pages > 0 else None
             )
@@ -652,26 +644,31 @@ def list_polls(
             # Record impressions for the polls being displayed
             record_list_impressions(request, page_obj.object_list)
 
-            for poll in page_obj.object_list:
-                # UPDATED: Enhanced poll resolution with status-aware data
-                poll_data = PollDetails.resolve(poll, profile)
+            # Use bulk expiration update for better performance
+            polls_data = PollDetails.resolve_list(page_obj.object_list, profile)
 
-                # Add moderation info for appropriate users
-                if poll.status in ["pending_moderation", "rejected"] and profile:
-                    if poll.profile == profile or (
+            # Add moderation info for appropriate users
+            for poll_data in polls_data:
+                if (
+                    poll_data["status"] in ["pending_moderation", "rejected"]
+                    and profile
+                ):
+                    # Find the original poll object to check ownership
+                    original_poll = next(
+                        p for p in page_obj.object_list if p.id == poll_data["id"]
+                    )
+                    if original_poll.profile == profile or (
                         hasattr(profile, "is_staff") and profile.is_staff
                     ):
                         poll_data["moderation_info"] = {
-                            "status": poll.status,
-                            "reason": poll.moderation_reason,
+                            "status": original_poll.status,
+                            "reason": original_poll.moderation_reason,
                             "moderated_at": (
-                                poll.moderated_at.isoformat()
-                                if poll.moderated_at
+                                original_poll.moderated_at.isoformat()
+                                if original_poll.moderated_at
                                 else None
                             ),
                         }
-
-                polls_data.append(poll_data)
 
         return 200, {
             "items": polls_data,
@@ -681,7 +678,7 @@ def list_polls(
             "page_size": page_size,
             "has_next": page_obj.has_next() if page_obj else False,
             "has_previous": page_obj.has_previous() if page_obj else False,
-            "filters_applied": applied_filters,  # For debugging
+            "filters_applied": applied_filters,
             "feed_type": "for_you" if category_id == 1 else "standard",
         }
 

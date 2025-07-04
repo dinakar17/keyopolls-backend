@@ -124,7 +124,7 @@ class CommunityDetails(Schema):
             id=community.id,
             name=community.name,
             description=community.description,
-            rules=community.rules if community.rules else [],  # Include rules if any
+            rules=community.rules,
             avatar=community.avatar.url if community.avatar else None,
             banner=None,  # Skip banner for list views
             community_type=community.community_type,
@@ -203,6 +203,7 @@ class CommunityDetails(Schema):
             id=community.id,
             name=community.name,
             description=community.description,
+            rules=community.rules or [],  # Ensure rules is a list
             avatar=community.avatar.url if community.avatar else None,
             banner=community.banner.url if community.banner else None,
             community_type=community.community_type,
