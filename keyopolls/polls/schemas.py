@@ -283,12 +283,12 @@ class PollDetails(Schema):
                 Poll.objects.filter(
                     id__in=expired_poll_ids,
                     status="active",  # Double-check they're still active
-                ).update(status="expired", updated_at=now)
+                ).update(status="closed", updated_at=now)
 
                 # Update the in-memory objects to reflect the change
                 for poll in polls:
                     if poll.id in expired_poll_ids and poll.status == "active":
-                        poll.status = "expired"
+                        poll.status = "closed"
                         poll.updated_at = now
 
             except Exception as e:
@@ -486,7 +486,7 @@ class PollDetails(Schema):
                         and poll.expires_at
                         and poll.expires_at <= now
                     ):
-                        poll.status = "expired"
+                        poll.status = "closed"
                         poll.save(update_fields=["status", "updated_at"])
             except Exception as e:
                 import logging

@@ -44,7 +44,7 @@ def cast_vote(request, data: CastVoteSchema):
             poll = (
                 Poll.objects.select_related("community", "profile")
                 .prefetch_related("options")
-                .get(id=data.poll_id, is_deleted=False)
+                .get(id=data.poll_id, is_difeleted=False)
             )
         except Poll.DoesNotExist:
             return 404, {"message": "Poll not found"}
@@ -303,7 +303,6 @@ def list_polls(
         valid_statuses = [
             "active",
             "closed",
-            "expired",
             "archived",
             "draft",
             "pending_moderation",
@@ -346,7 +345,6 @@ def list_polls(
                 status = [
                     "active",
                     "closed",
-                    "expired",
                     "archived",
                     "draft",
                     "pending_moderation",
@@ -358,7 +356,7 @@ def list_polls(
                 status = [
                     "active",
                     "closed",
-                    "expired",
+                    "closed",
                     "archived",
                     "draft",
                     "pending_moderation",
@@ -367,7 +365,7 @@ def list_polls(
                 applied_filters["default_own_author_all_statuses"] = True
             else:
                 # For public feeds, show active, closed, and expired by default
-                status = ["active", "closed", "expired"]
+                status = ["active", "closed", "closed"]
                 applied_filters["default_public_statuses"] = True
 
         # === HANDLE SPECIAL CATEGORY: FOR-YOU FEED ===
@@ -566,14 +564,14 @@ def list_polls(
             applied_filters["min_aura"] = min_aura
 
         # Expiration filter
-        if not include_expired:
-            from django.utils import timezone
+        # if not include_expired:
+        #     from django.utils import timezone
 
-            now = timezone.now()
-            polls = polls.filter(
-                models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now)
-            )
-            applied_filters["exclude_expired"] = True
+        #     now = timezone.now()
+        #     polls = polls.filter(
+        #         models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now)
+        #     )
+        #     applied_filters["exclude_expired"] = True
 
         # Search functionality
         if search:
