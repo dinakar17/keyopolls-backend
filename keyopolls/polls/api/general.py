@@ -44,7 +44,7 @@ def cast_vote(request, data: CastVoteSchema):
             poll = (
                 Poll.objects.select_related("community", "profile")
                 .prefetch_related("options")
-                .get(id=data.poll_id, is_difeleted=False)
+                .get(id=data.poll_id, is_deleted=False)
             )
         except Poll.DoesNotExist:
             return 404, {"message": "Poll not found"}
