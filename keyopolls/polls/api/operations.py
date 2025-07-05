@@ -18,6 +18,7 @@ from keyopolls.polls.schemas import (
 )
 from keyopolls.polls.services.content_moderation import ContentModerationService
 from keyopolls.profile.middleware import PseudonymousJWTAuth
+from keyopolls.utils.contentUtils import increment_aura
 
 logger = logging.getLogger(__name__)
 router = Router(tags=["Polls"], auth=PseudonymousJWTAuth())
@@ -180,9 +181,9 @@ def create_poll(
             profile=profile, community=community, created_at__date=today
         ).count()  # This now includes rejected polls
 
-        if daily_poll_count >= 4:
+        if daily_poll_count >= 3:
             return 400, {
-                "message": "You can only create 4 polls per day in this community"
+                "message": "You can only create 3 polls per day in this community"
             }
 
         # Use database transaction
@@ -259,11 +260,6 @@ def create_poll(
                 # Initialize content moderation service
                 moderation_service = ContentModerationService()
 
-                # Prepare data for moderation
-                poll_options = []
-                if data.poll_type != "text_input":
-                    poll_options = [opt.text for opt in data.options]
-
                 # Get community rules and category information
                 community_rules = getattr(community, "rules", []) or []
                 category_name = (
@@ -280,7 +276,6 @@ def create_poll(
                     moderation_service.evaluate_poll_content(
                         poll_title=poll.title,
                         poll_description=poll.description,
-                        poll_options=poll_options,
                         community_name=community.name,
                         community_description=community.description,
                         community_rules=community_rules,
@@ -298,6 +293,21 @@ def create_poll(
                     # Update community poll count only for approved polls
                     community.poll_count = models.F("poll_count") + 1
                     community.save(update_fields=["poll_count"])
+
+                    # NEW: Increment user's poll aura by 1 point for successful
+                    #  poll creation
+                    try:
+                        aura_result = increment_aura(profile, "polls", 1)
+                        logger.info(
+                            f"Aura incremented for user {profile.id} after poll "
+                            f"creation: {aura_result}"
+                        )
+                    except Exception as aura_error:
+                        # Log the error but don't fail the poll creation
+                        logger.error(
+                            f"Failed to increment aura for user {profile.id}: "
+                            f"{str(aura_error)}"
+                        )
 
                     # Refresh poll with options
                     poll.refresh_from_db()

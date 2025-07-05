@@ -1,4 +1,9 @@
-from keyopolls.utils.contentUtils import get_content_object, record_list_impressions
+from keyopolls.utils.contentUtils import (
+    decrement_aura,
+    get_content_object,
+    increment_aura,
+    record_list_impressions,
+)
 from keyopolls.utils.email_domains import validate_organizational_email
 from keyopolls.utils.geoipUtils import get_country_from_ip
 from keyopolls.utils.mediaUtils import (
@@ -23,4 +28,6 @@ __all__ = [
     "delete_existing_media_and_links",
     "get_country_from_ip",
     "validate_media_file",
+    "increment_aura",
+    "decrement_aura",
 ]

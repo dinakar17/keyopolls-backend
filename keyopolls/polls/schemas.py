@@ -195,6 +195,7 @@ class PollDetails(Schema):
     # Author info
     author_username: str
     author_display_name: str
+    author_avatar: Optional[str] = None  # Author's avatar URL
     author_aura: int
 
     # Community info
@@ -432,6 +433,7 @@ class PollDetails(Schema):
             "status": poll.status,
             "author_username": poll.profile.username,
             "author_display_name": poll.profile.display_name,
+            "author_avatar": (poll.profile.avatar.url if poll.profile.avatar else None),
             "author_aura": poll.profile.total_aura,
             "community_id": poll.community.id,
             "community_name": poll.community.name,

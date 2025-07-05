@@ -22,7 +22,6 @@ class ContentModerationService:
         self,
         poll_title: str,
         poll_description: str,
-        poll_options: List[str],
         community_name: str,
         community_description: str,
         community_rules: List[str],
@@ -49,7 +48,6 @@ class ContentModerationService:
             prompt = self._build_moderation_prompt(
                 poll_title,
                 poll_description,
-                poll_options,
                 community_name,
                 community_description,
                 community_rules,
@@ -160,7 +158,6 @@ class ContentModerationService:
         self,
         title: str,
         description: str,
-        options: List[str],
         community_name: str,
         community_description: str,
         community_rules: List[str],
@@ -170,7 +167,6 @@ class ContentModerationService:
     ) -> str:
         """Build the moderation prompt for Claude"""
 
-        options_text = "\n".join([f"- {option}" for option in options])
         rules_text = (
             "\n".join([f"- {rule}" for rule in community_rules])
             if community_rules
@@ -178,10 +174,8 @@ class ContentModerationService:
         )
 
         prompt = f"""
-(
-    "You are a content moderator for an online community platform. "
-    "Please evaluate whether this poll is appropriate and follows the guidelines."
-)
+You are a content moderator for an online community platform.
+Please evaluate whether this poll is appropriate and follows the guidelines.
 
 CATEGORY INFORMATION:
 Name: {category_name}
@@ -198,39 +192,41 @@ COMMUNITY RULES:
 POLL TO EVALUATE:
 Title: {title}
 Description: {description}
-Options:
-{options_text}
 
 MODERATION CRITERIA:
 
-1. CATEGORY RELEVANCE:
+1. TITLE CLARITY:
+   - Title must be clear and specific (not vague)
+   - Should clearly indicate what the poll is about
+
+2. CATEGORY RELEVANCE:
    - Content must be relevant to the category "{category_name}"
    - Poll topic should align with the category's purpose and description
 
-2. IMAGE QUALITY & CONTENT (if images provided):
-   - Images must be of reasonable quality (not blurry, pixelated, or low-effort)
-   - No offensive content (hate symbols, inappropriate imagery, etc.)
-   - Images should be relevant to the poll options
+3. IMAGE QUALITY & CONTENT (if images provided):
+   - Images must be of good quality (not blurry, pixelated, or low-effort)
+   - No inappropriate content (offensive, explicit, hateful imagery, etc.)
+   - Images should be relevant to the poll content
 
-3. COMMUNITY RULES COMPLIANCE:
+4. COMMUNITY RULES COMPLIANCE:
+   - Content must follow the community rules
    - Be fair and reasonable when evaluating community rules
-   - Don't be overly strict - allow content that generally fits the community spirit
    - Focus on clear violations rather than borderline cases
 
-(
-    "Be fair and balanced in your evaluation. Approve content that generally fits "
-    "the category and follows basic community guidelines, even if it's not perfect."
-)
+Be fair and balanced in your evaluation. Approve content that has a clear title,
+fits the category, has quality images (if any), and follows community guidelines.
 
 Please respond in the following JSON format:
 {{
     "is_appropriate": true/false,
+    "title_is_clear": true/false,
     "belongs_to_category": true/false,
     "images_approved": true/false,
     "follows_community_rules": true/false,
     "overall_approved": true/false,
     "reason": "Brief explanation of your decision",
     "detailed_analysis": {{
+        "title_assessment": "Assessment of title clarity and specificity",
         "category_relevance": "How well content fits the category",
         "image_quality": "Assessment of image quality and appropriateness (if any)",
         "community_rules_assessment": "How well content follows community rules",

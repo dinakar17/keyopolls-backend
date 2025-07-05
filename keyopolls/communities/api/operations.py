@@ -58,8 +58,12 @@ def create_community(
         if len(data.name.strip()) > 25:
             return 400, {"message": "Community name cannot exceed 25 characters"}
 
-        # Check if community name already exists (case-insensitive)
+        # Check if community name already exists (case-insensitive) or slug exists
+        name_slug = slugify(data.name.strip())
         if Community.objects.filter(name__iexact=data.name.strip()).exists():
+            return 400, {"message": "A community with this name already exists"}
+
+        if Community.objects.filter(slug=name_slug).exists():
             return 400, {"message": "A community with this name already exists"}
 
         # Validate category exists

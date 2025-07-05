@@ -2,7 +2,8 @@ import logging
 from typing import Any, Dict
 
 from django.apps import apps
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
+from django.db import transaction
 
 from keyopolls.common.models import Impression
 from keyopolls.common.schemas import ContentTypeEnum
@@ -97,3 +98,85 @@ def record_list_impressions(request, objects_list, include_stats=False):
     stats = Impression.record_bulk_impressions(objects_list, request)
 
     return stats if include_stats else None
+
+
+def increment_aura(
+    profile: PseudonymousProfile, aura_type: str, amount: int
+) -> Dict[str, int]:
+    """
+    Increment aura score for a specific type.
+
+    Args:
+        profile: PseudonymousProfile instance
+        aura_type: Either 'polls' or 'comments'
+        amount: Integer amount to increment (must be positive)
+
+    Returns:
+        dict: Updated aura scores
+
+    Raises:
+        ValidationError: If invalid aura_type or negative amount
+    """
+    if aura_type not in ["polls", "comments"]:
+        raise ValidationError("aura_type must be either 'polls' or 'comments'")
+
+    if not isinstance(amount, int) or amount < 0:
+        raise ValidationError("amount must be a positive integer")
+
+    # Use atomic transaction to ensure data consistency
+    with transaction.atomic():
+        # Lock the profile row to prevent race conditions
+        profile = profile.__class__.objects.select_for_update().get(id=profile.id)
+
+        if aura_type == "polls":
+            profile.aura_polls += amount
+        else:  # comments
+            profile.aura_comments += amount
+
+        profile.save(update_fields=[f"aura_{aura_type}", "updated_at"])
+
+    return {
+        "aura_polls": profile.aura_polls,
+        "aura_comments": profile.aura_comments,
+        "total_aura": profile.total_aura,
+    }
+
+
+def decrement_aura(profile, aura_type, amount):
+    """
+    Decrement aura score for a specific type (useful for penalties or corrections).
+
+    Args:
+        profile: PseudonymousProfile instance
+        aura_type: Either 'polls' or 'comments'
+        amount: Integer amount to decrement (must be positive)
+
+    Returns:
+        dict: Updated aura scores
+
+    Raises:
+        ValidationError: If invalid aura_type or negative amount
+    """
+    if aura_type not in ["polls", "comments"]:
+        raise ValidationError("aura_type must be either 'polls' or 'comments'")
+
+    if not isinstance(amount, int) or amount < 0:
+        raise ValidationError("amount must be a positive integer")
+
+    # Use atomic transaction to ensure data consistency
+    with transaction.atomic():
+        # Lock the profile row to prevent race conditions
+        profile = profile.__class__.objects.select_for_update().get(id=profile.id)
+
+        if aura_type == "polls":
+            profile.aura_polls = max(0, profile.aura_polls - amount)
+        else:  # comments
+            profile.aura_comments = max(0, profile.aura_comments - amount)
+
+        profile.save(update_fields=[f"aura_{aura_type}", "updated_at"])
+
+    return {
+        "aura_polls": profile.aura_polls,
+        "aura_comments": profile.aura_comments,
+        "total_aura": profile.total_aura,
+    }

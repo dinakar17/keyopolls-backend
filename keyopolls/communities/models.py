@@ -1,13 +1,12 @@
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
 from django.utils import timezone
+from django.utils.text import slugify
 
 from keyopolls.common.models import TaggedItem
 
 
 class Community(models.Model):
-    """Simple community model"""
-
     COMMUNITY_TYPE_CHOICES = [
         ("public", "Public"),
         ("private", "Private"),
@@ -16,6 +15,13 @@ class Community(models.Model):
 
     id = models.BigAutoField(primary_key=True)
     name = models.CharField(max_length=100, unique=True)
+    slug = models.SlugField(
+        max_length=100,
+        unique=True,
+        help_text="Unique URL-friendly identifier for the community",
+        null=True,
+        blank=True,
+    )
     description = models.TextField(blank=True)
 
     avatar = models.ImageField(
@@ -86,6 +92,11 @@ class Community(models.Model):
         ]
         ordering = ["-created_at"]
         verbose_name_plural = "Communities"
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.name)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.name} ({self.get_community_type_display()})"

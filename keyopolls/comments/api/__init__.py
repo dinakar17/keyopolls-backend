@@ -43,6 +43,7 @@ from keyopolls.utils import (
     create_media_object,
     delete_existing_media_and_links,
     get_content_object,
+    increment_aura,
     validate_media_file,
 )
 
@@ -142,6 +143,20 @@ def create_comment(
             # (direct + replies)
             content_obj.comment_count = F("comment_count") + 1
             content_obj.save(update_fields=["comment_count"])
+
+            # NEW: Increment user's comment aura by 1 point for successful
+            #  comment creation
+            try:
+                aura_result = increment_aura(profile, "comments", 1)
+                logger.info(
+                    f"Aura incremented for user {profile.id} after comment creation: "
+                    f"{aura_result}"
+                )
+            except Exception as aura_error:
+                # Log the error but don't fail the comment creation
+                logger.error(
+                    f"Failed to increment aura for user {profile.id}: {str(aura_error)}"
+                )
 
             # === NOTIFICATION TRIGGERS - COMMENTED OUT FOR NOW ===
             # Will be updated later when notification system is implemented
