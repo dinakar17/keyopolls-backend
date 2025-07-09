@@ -56,14 +56,14 @@ class CommunityListQuery(Schema):
 
 
 @router.get(
-    "/communities/{community_name}",
+    "/communities/{community_slug}",
     auth=OptionalPseudonymousJWTAuth,
     response={
         200: CommunityDetails,
         404: Message,
     },
 )
-def get_community(request: HttpRequest, community_name: str):
+def get_community(request: HttpRequest, community_slug: str):
     """
     Get a single community by ID.
     Handles all visibility rules and user-specific data.
@@ -73,7 +73,7 @@ def get_community(request: HttpRequest, community_name: str):
     try:
         # Get community with optimized queries
         community = get_object_or_404(
-            Community.objects.select_related("creator", "category"), name=community_name
+            Community.objects.select_related("creator", "category"), slug=community_slug
         )
 
         # Visibility checks
@@ -104,7 +104,7 @@ def get_community(request: HttpRequest, community_name: str):
 
     except Exception as e:
         logger.error(
-            f"Error getting community {community_name}: {str(e)}", exc_info=True
+            f"Error getting community {community_slug}: {str(e)}", exc_info=True
         )
         return 404, {"message": "Community not found"}
 

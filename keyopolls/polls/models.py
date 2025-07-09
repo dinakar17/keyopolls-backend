@@ -32,6 +32,9 @@ class Poll(models.Model, ImpressionTrackingMixin):
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
 
+    # Explanation
+    explanation = models.TextField(blank=True)
+
     # Image for the poll (especially useful for text input polls)
     image = models.ImageField(upload_to="poll_images/", null=True, blank=True)
 

@@ -16,7 +16,6 @@ from keyopolls.polls.schemas import (
     PollDetails,
     PollUpdateSchema,
 )
-from keyopolls.polls.services.content_moderation import ContentModerationService
 from keyopolls.profile.middleware import PseudonymousJWTAuth
 from keyopolls.utils.contentUtils import increment_aura
 
@@ -165,6 +164,10 @@ def create_poll(
                         )
                     }
 
+        # Validate explanation field (mandatory)
+        if not data.explanation or len(data.explanation.strip()) < 250:
+            return 400, {"message": "Explanation must be at least 250 characters"}
+
         # Validate option images
         if option_images:
             if data.poll_type == "text_input":
@@ -174,12 +177,11 @@ def create_poll(
                 if len(option_images) > len(data.options):
                     return 400, {"message": "Too many images provided for options"}
 
-        # Check daily poll limit (10 polls per day per community).
-        # This now includes all attempts.
+        # Check daily poll limit (3 polls per day per community)
         today = timezone.now().date()
         daily_poll_count = Poll.objects.filter(
             profile=profile, community=community, created_at__date=today
-        ).count()  # This now includes rejected polls
+        ).count()
 
         if daily_poll_count >= 3:
             return 400, {
@@ -197,20 +199,20 @@ def create_poll(
                 community.member_count = models.F("member_count") + 1
                 community.save(update_fields=["member_count"])
 
-            # Prepare poll creation data based on poll type
+            # Prepare poll creation data
             poll_data = {
                 "title": data.title.strip(),
                 "description": data.description.strip() if data.description else "",
+                "explanation": data.explanation.strip(),
                 "poll_type": data.poll_type,
                 "community": community,
                 "profile": profile,
                 "requires_aura": data.requires_aura,
-                "expires_at": data.expires_at,
                 "has_correct_answer": data.has_correct_answer,
                 "option_count": (
                     len(data.options) if data.poll_type != "text_input" else 0
                 ),
-                "status": "pending_moderation",  # NEW: Start with pending status
+                "status": "active",  # Direct approval without moderation
             }
 
             # Add poll-type-specific fields
@@ -227,14 +229,12 @@ def create_poll(
                 if data.has_correct_answer and data.correct_ranking_order:
                     poll_data["correct_ranking_order"] = data.correct_ranking_order
 
-            # Create the poll (with pending_moderation status)
+            # Create the poll (with active status)
             poll = Poll.objects.create(**poll_data)
 
             # Handle images for text input polls
             if data.poll_type == "text_input" and option_images:
-                # For text input polls, store the image in the poll's description
-                # or a separate field (assuming you have a poll.image field)
-                # For now, we'll assume you have a poll.image field
+                # For text input polls, store the image in the poll's image field
                 poll.image = option_images[0]
                 poll.save()
 
@@ -255,99 +255,28 @@ def create_poll(
                         option.image = option_images[i]
                         option.save()
 
-            # NEW: CONTENT MODERATION AFTER POLL CREATION
+            # Update community poll count
+            community.poll_count = models.F("poll_count") + 1
+            community.save(update_fields=["poll_count"])
+
+            # Increment user's poll aura by 1 point for successful poll creation
             try:
-                # Initialize content moderation service
-                moderation_service = ContentModerationService()
-
-                # Get community rules and category information
-                community_rules = getattr(community, "rules", []) or []
-                category_name = (
-                    community.category.name if community.category else "General"
+                aura_result = increment_aura(profile, "polls", 1)
+                logger.info(
+                    f"Aura incremented for user {profile.id} after poll "
+                    f"creation: {aura_result}"
                 )
-                category_description = (
-                    community.category.description
-                    if community.category
-                    else "General category"
-                )
-
-                # Run content moderation
-                is_approved, reason, detailed_analysis = (
-                    moderation_service.evaluate_poll_content(
-                        poll_title=poll.title,
-                        poll_description=poll.description,
-                        community_name=community.name,
-                        community_description=community.description,
-                        community_rules=community_rules,
-                        category_name=category_name,
-                        category_description=category_description,
-                        community_type=community.community_type,
-                        option_images=option_images,
-                    )
-                )
-
-                if is_approved:
-                    # Approve the poll
-                    poll.approve_poll()
-
-                    # Update community poll count only for approved polls
-                    community.poll_count = models.F("poll_count") + 1
-                    community.save(update_fields=["poll_count"])
-
-                    # NEW: Increment user's poll aura by 1 point for successful
-                    #  poll creation
-                    try:
-                        aura_result = increment_aura(profile, "polls", 1)
-                        logger.info(
-                            f"Aura incremented for user {profile.id} after poll "
-                            f"creation: {aura_result}"
-                        )
-                    except Exception as aura_error:
-                        # Log the error but don't fail the poll creation
-                        logger.error(
-                            f"Failed to increment aura for user {profile.id}: "
-                            f"{str(aura_error)}"
-                        )
-
-                    # Refresh poll with options
-                    poll.refresh_from_db()
-
-                    return 201, PollDetails.resolve(poll, profile)
-                else:
-                    # Reject the poll but keep it in database
-                    poll.reject_poll(reason)
-
-                    # Log the rejection for audit
-                    logger.info(
-                        f"Poll {poll.id} rejected by moderation: {reason}",
-                        extra={
-                            "poll_id": poll.id,
-                            "profile_id": profile.id,
-                            "community_id": community.id,
-                            "detailed_analysis": detailed_analysis,
-                        },
-                    )
-
-                    return 400, {
-                        "message": f"Poll content not approved: {reason}",
-                        "poll_id": poll.id,  # For audit purposes
-                    }
-
-            except Exception as moderation_error:
-                # If moderation service fails, reject the poll
+            except Exception as aura_error:
+                # Log the error but don't fail the poll creation
                 logger.error(
-                    (
-                        f"Content moderation failed for poll {poll.id}: "
-                        f"{str(moderation_error)}"
-                    ),
-                    exc_info=True,
+                    f"Failed to increment aura for user {profile.id}: "
+                    f"{str(aura_error)}"
                 )
-                poll.reject_poll(f"Moderation service error: {str(moderation_error)}")
 
-                return 400, {
-                    "message": "Content moderation failed. Please try again later.",
-                    "poll_id": poll.id,
-                }
+            # Refresh poll with options
+            poll.refresh_from_db()
+
+            return 201, PollDetails.resolve(poll, profile)
 
     except ValidationError as e:
         logger.error(f"Validation error: {str(e)}")

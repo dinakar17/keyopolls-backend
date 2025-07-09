@@ -13,7 +13,7 @@ class CommunityCreateSchema(Schema):
     name: str
     description: Optional[str] = ""
     community_type: str = "public"  # public, private, restricted
-    category_id: int
+    category_id: Optional[int] = None  # Category ID for categorization
     tag_names: List[str] = []  # List of tag names (max 3)
 
 
@@ -61,13 +61,13 @@ class UserPermissionsSchema(Schema):
 class CommunityDetails(Schema):
     id: int
     name: str
+    slug: Optional[str] = None  # Slug for URL-friendly names
     description: str
     rules: Optional[List[str]] = None  # List of community rules
     avatar: Optional[str] = None
     banner: Optional[str] = None
     community_type: str
     creator_id: int
-    category: CategoryResponseSchema
     tags: List[TagResponseSchema]
     member_count: int
     poll_count: int
@@ -86,14 +86,6 @@ class CommunityDetails(Schema):
         Resolve minimal community details for list views.
         Returns only essential fields, leaves others empty for performance.
         """
-        # Basic category data (minimal)
-        category_data = CategoryResponseSchema(
-            id=community.category.id,
-            name=community.category.name,
-            slug=community.category.slug,
-            description="",  # Empty for minimal
-            category_type=community.category.category_type,
-        )
 
         # Basic membership status if user is authenticated
         membership_details = None
@@ -123,13 +115,13 @@ class CommunityDetails(Schema):
         return CommunityDetails(
             id=community.id,
             name=community.name,
+            slug=community.slug,
             description=community.description,
             rules=community.rules,
             avatar=community.avatar.url if community.avatar else None,
             banner=None,  # Skip banner for list views
             community_type=community.community_type,
             creator_id=community.creator.id,
-            category=category_data,
             tags=[],  # Empty tags list for performance
             member_count=community.member_count,
             poll_count=community.poll_count,
@@ -146,14 +138,6 @@ class CommunityDetails(Schema):
         """
         Resolve full community details for detailed views.
         """
-        # Get category data
-        category_data = CategoryResponseSchema(
-            id=community.category.id,
-            name=community.category.name,
-            slug=community.category.slug,
-            description=community.category.description,
-            category_type=community.category.category_type,
-        )
 
         # Get tags data
         community_content_type = ContentType.objects.get_for_model(Community)
@@ -202,13 +186,13 @@ class CommunityDetails(Schema):
         return CommunityDetails(
             id=community.id,
             name=community.name,
+            slug=community.slug,
             description=community.description,
             rules=community.rules or [],  # Ensure rules is a list
             avatar=community.avatar.url if community.avatar else None,
             banner=community.banner.url if community.banner else None,
             community_type=community.community_type,
             creator_id=community.creator.id,
-            category=category_data,
             tags=tags_data,
             member_count=community.member_count,
             poll_count=community.poll_count,

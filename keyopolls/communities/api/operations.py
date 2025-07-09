@@ -1,13 +1,11 @@
 import logging
 
-from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import HttpRequest
 from django.utils.text import slugify
 from ninja import File, Router, UploadedFile
 
-from keyopolls.common.models import Category, Tag, TaggedItem
 from keyopolls.common.schemas import Message
 from keyopolls.communities.models import Community, CommunityMembership
 from keyopolls.communities.schemas import (
@@ -36,6 +34,7 @@ def create_community(
     request: HttpRequest,
     data: CommunityCreateSchema,
     avatar: UploadedFile = File(None),
+    banner: UploadedFile = File(None),
 ):
     """Create a new community"""
     profile = request.auth
@@ -51,13 +50,6 @@ def create_community(
                 )
             }
 
-        # Validate community name
-        if not data.name or len(data.name.strip()) < 3:
-            return 400, {"message": "Community name must be at least 3 characters long"}
-
-        if len(data.name.strip()) > 25:
-            return 400, {"message": "Community name cannot exceed 25 characters"}
-
         # Check if community name already exists (case-insensitive) or slug exists
         name_slug = slugify(data.name.strip())
         if Community.objects.filter(name__iexact=data.name.strip()).exists():
@@ -66,31 +58,35 @@ def create_community(
         if Community.objects.filter(slug=name_slug).exists():
             return 400, {"message": "A community with this name already exists"}
 
-        # Validate category exists
-        try:
-            category = Category.objects.get(id=data.category_id)
-        except Category.DoesNotExist:
-            return 400, {"message": "Category not found"}
+        # # Validate category exists
+        # try:
+        #     category = Category.objects.get(id=data.category_id)
+        # except Category.DoesNotExist:
+        #     return 400, {"message": "Category not found"}
 
-        # Validate tags (max 3)
-        if len(data.tag_names) > 3:
-            return 400, {"message": "Community cannot have more than 3 tags"}
+        # # Validate tags (max 3)
+        # if len(data.tag_names) > 3:
+        #     return 400, {"message": "Community cannot have more than 3 tags"}
 
         # Validate and prepare tags
-        tag_names = [name.strip().lower() for name in data.tag_names if name.strip()]
-        if len(set(tag_names)) != len(tag_names):
-            return 400, {"message": "Duplicate tags are not allowed"}
+        # tag_names = [name.strip().lower() for name in data.tag_names if name.strip()]
+        # if len(set(tag_names)) != len(tag_names):
+        #     return 400, {"message": "Duplicate tags are not allowed"}
 
-        # Validate tag names
-        for tag_name in tag_names:
-            if len(tag_name) < 2:
-                return 400, {"message": "Tag names must be at least 2 characters long"}
-            if len(tag_name) > 50:
-                return 400, {"message": "Tag names cannot exceed 50 characters"}
+        # # Validate tag names
+        # for tag_name in tag_names:
+        #     if len(tag_name) < 2:
+        #         return 400, {"message": "Tag names must be at least 2
+        # characters long"}
+        #     if len(tag_name) > 50:
+        #         return 400, {"message": "Tag names cannot exceed 50 characters"}
 
         # validate media files
         if avatar and avatar.size > 5 * 1024 * 1024:
             return 400, {"message": "Avatar image cannot exceed 5MB"}
+
+        if banner and banner.size > 10 * 1024 * 1024:
+            return 400, {"message": "Banner image cannot exceed 10MB"}
 
         # Use database transaction
         with transaction.atomic():
@@ -99,9 +95,10 @@ def create_community(
                 name=data.name.strip(),
                 description=data.description.strip() if data.description else "",
                 community_type=data.community_type,
-                category=category,
+                # category=category,
                 creator=profile,
                 avatar=avatar,
+                banner=banner,
                 member_count=1,  # Creator is the first member
             )
 
@@ -111,19 +108,20 @@ def create_community(
             )
 
             # Create/get tags and associate them with the community
-            community_content_type = ContentType.objects.get_for_model(Community)
+            # community_content_type = ContentType.objects.get_for_model(Community)
 
-            for tag_name in tag_names:
-                # Get or create tag
-                tag, created = Tag.objects.get_or_create(
-                    name=tag_name,
-                    defaults={"slug": slugify(tag_name), "usage_count": 0},
-                )
+            # for tag_name in tag_names:
+            #     # Get or create tag
+            #     tag, created = Tag.objects.get_or_create(
+            #         name=tag_name,
+            #         defaults={"slug": slugify(tag_name), "usage_count": 0},
+            #     )
 
-                # Create tagged item (this will increment usage_count via save method)
-                TaggedItem.objects.create(
-                    tag=tag, content_type=community_content_type, object_id=community.id
-                )
+            #     # Create tagged item (this will increment usage_count via save method)
+            #     TaggedItem.objects.create(
+            #         tag=tag, content_type=community_content_type,
+            # object_id=community.id
+            #     )
 
             # Refresh community with related data
             community.refresh_from_db()

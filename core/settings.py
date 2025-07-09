@@ -163,7 +163,6 @@ else:
 
 DATABASES = {
     "default": dj_database_url.parse(
-        # "postgres://postgres:12345@localhost:5432/keyopolls"
         config("DATABASE_URL", default="sqlite:///db.sqlite3"),
     )
 }
