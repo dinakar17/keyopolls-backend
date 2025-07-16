@@ -93,6 +93,8 @@ INSTALLED_APPS = [
     "keyopolls.notifications",
     "keyopolls.polls",
     "keyopolls.communities",
+    "keyopolls.articles",
+    "keyopolls.flashcards",
     # AWS S3
     "storages",
     # Celery
