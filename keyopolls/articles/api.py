@@ -1,19 +1,20 @@
-from typing import List, Optional
+from typing import Optional
 
-from communities.models import Community
+from django.core.paginator import Paginator
+from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
-from ninja import Query, Router, Schema
-from ninja.pagination import PageNumberPagination, paginate
+from ninja import File, Query, Router, Schema, UploadedFile
 
 from keyopolls.articles.models import Article
 from keyopolls.articles.schemas import (
     ArticleCreateSchema,
     ArticleDetails,
-    ArticleListItem,
+    ArticlesList,
     ArticleUpdateSchema,
-    MessageSchema,
 )
+from keyopolls.common.schemas import Message, PaginationSchema
+from keyopolls.communities.models import Community
 from keyopolls.profile.middleware import (
     OptionalPseudonymousJWTAuth,
     PseudonymousJWTAuth,
@@ -22,8 +23,12 @@ from keyopolls.profile.middleware import (
 router = Router()
 
 
-@router.post("/", response=ArticleDetails, auth=PseudonymousJWTAuth())
-def create_article(request, data: ArticleCreateSchema):
+@router.post(
+    "/", response={201: ArticleDetails, 400: Message}, auth=PseudonymousJWTAuth()
+)
+def create_article(
+    request, data: ArticleCreateSchema, main_image: UploadedFile = File(None)
+):
     """
     Create a new article.
     Requires authentication.
@@ -40,14 +45,26 @@ def create_article(request, data: ArticleCreateSchema):
         content=data.content,
         community=community,
         author=request.auth,  # PseudonymousProfile from JWT
+        link=data.link,
+        main_image=main_image,
+        author_name=data.author_name,
         is_published=data.is_published,
     )
 
     return ArticleDetails.resolve(article, request.auth)
 
 
-@router.put("/{int:article_id}", response=ArticleDetails, auth=PseudonymousJWTAuth())
-def update_article(request, article_id: int, data: ArticleUpdateSchema):
+@router.put(
+    "/{int:article_id}",
+    response={200: ArticleDetails, 404: Message},
+    auth=PseudonymousJWTAuth(),
+)
+def update_article(
+    request,
+    article_id: int,
+    data: ArticleUpdateSchema,
+    main_image: UploadedFile = File(None),
+):
     """
     Update an existing article.
     Only the author can update their article.
@@ -56,7 +73,7 @@ def update_article(request, article_id: int, data: ArticleUpdateSchema):
 
     # Check if user is the author
     if article.author.id != request.auth.id:
-        raise Http404("Article not found")  # Don't reveal existence to non-authors
+        return 404, {"message": "Article not found"}
 
     # Update only provided fields
     if data.title is not None:
@@ -65,6 +82,12 @@ def update_article(request, article_id: int, data: ArticleUpdateSchema):
         article.subtitle = data.subtitle
     if data.content is not None:
         article.content = data.content
+    if data.author_name is not None:
+        article.author_name = data.author_name
+    if data.link is not None:
+        article.link = data.link
+    if main_image:
+        article.main_image = main_image
     if data.is_published is not None:
         article.is_published = data.is_published
 
@@ -73,7 +96,11 @@ def update_article(request, article_id: int, data: ArticleUpdateSchema):
     return ArticleDetails.resolve(article, request.auth)
 
 
-@router.delete("/{int:article_id}", response=MessageSchema, auth=PseudonymousJWTAuth())
+@router.delete(
+    "/{int:article_id}",
+    response={204: Message, 404: Message},
+    auth=PseudonymousJWTAuth(),
+)
 def delete_article(request, article_id: int):
     """
     Delete an article.
@@ -91,7 +118,9 @@ def delete_article(request, article_id: int):
 
 
 @router.get(
-    "/{int:article_id}", response=ArticleDetails, auth=OptionalPseudonymousJWTAuth()
+    "/{int:article_id}",
+    response={200: ArticleDetails, 404: Message},
+    auth=OptionalPseudonymousJWTAuth,
 )
 def get_article(request, article_id: int):
     """
@@ -116,111 +145,182 @@ def get_article(request, article_id: int):
 
 
 class ArticleFilters(Schema):
-    """Query parameters for filtering articles"""
+    # Pagination
+    page: int = 1
+    per_page: int = 20
 
+    # Filters
     community_id: Optional[int] = None
+    community_slug: Optional[str] = None
     author_username: Optional[str] = None
-    is_published: Optional[bool] = True  # Default to published only
+    is_published: Optional[bool] = None
+    my_articles: bool = False  # Filter for current user's articles
+
+    # Search
     search: Optional[str] = None
 
-
-@router.get("/", response=List[ArticleListItem], auth=OptionalPseudonymousJWTAuth())
-@paginate(PageNumberPagination, page_size=20)
-def list_articles(request, filters: ArticleFilters = Query(...)):
-    """
-    Get a paginated list of articles.
-    Authentication is optional - provides additional context if authenticated.
-    """
-    queryset = Article.objects.select_related("author", "community").order_by(
-        "-created_at"
-    )
-
-    # Apply filters
-    if filters.community_id:
-        queryset = queryset.filter(community_id=filters.community_id)
-
-    if filters.author_username:
-        queryset = queryset.filter(author__username=filters.author_username)
-
-    # Handle published filter
-    if filters.is_published is not None:
-        if not request.auth:
-            # Non-authenticated users can only see published articles
-            queryset = queryset.filter(is_published=True)
-        else:
-            # Authenticated users can see their own unpublished articles
-            if filters.is_published:
-                queryset = queryset.filter(is_published=True)
-            else:
-                # Show unpublished articles only if they are the author
-                queryset = queryset.filter(is_published=False, author=request.auth)
-    else:
-        # If no published filter specified, show published + user's unpublished
-        if request.auth:
-            from django.db.models import Q
-
-            queryset = queryset.filter(Q(is_published=True) | Q(author=request.auth))
-        else:
-            queryset = queryset.filter(is_published=True)
-
-    # Apply search filter
-    if filters.search:
-        from django.db.models import Q
-
-        queryset = queryset.filter(
-            Q(title__icontains=filters.search)
-            | Q(subtitle__icontains=filters.search)
-            | Q(content__icontains=filters.search)
-        )
-
-    return [ArticleListItem.resolve(article, request.auth) for article in queryset]
-
-
-# Additional endpoints you might want to add:
+    # Sorting
+    order_by: str = "-created_at"  # Options: created_at, -created_at, title, -title
 
 
 @router.get(
-    "/community/{int:community_id}",
-    response=List[ArticleListItem],
-    auth=OptionalPseudonymousJWTAuth(),
+    "/",
+    response={200: ArticlesList, 400: Message, 404: Message},
+    auth=OptionalPseudonymousJWTAuth,
 )
-@paginate(PageNumberPagination, page_size=20)
-def list_community_articles(request, community_id: int):
+def list_articles(request, filters: ArticleFilters = Query(...)):
     """
-    Get articles for a specific community.
+    Get a paginated list of articles with comprehensive filtering options.
+
+    Features:
+    - Pagination with configurable page size
+    - Filter by community, creator, published status
+    - Search across title, subtitle, and content
+    - My articles filter for authenticated users
+    - Multiple sorting options
+    - Authentication-aware visibility (published vs drafts)
+
+    Query Parameters:
+    - page: Page number (default: 1)
+    - per_page: Items per page (default: 20, max: 100)
+    - community_id: Filter by community ID
+    - community_slug: Filter by community slug
+    - author_username: Filter by author username
+    - is_published: Filter by published status (true/false/null for all)
+    - my_articles: Show only current user's articles (requires auth)
+    - search: Search term for title, subtitle, or content
+    - order_by: Sort field (created_at, title with - for desc)
     """
-    # Verify community exists
-    get_object_or_404(Community, id=community_id)
 
-    queryset = (
-        Article.objects.select_related("author", "community")
-        .filter(community_id=community_id)
-        .order_by("-created_at")
-    )
+    # Validate pagination parameters
+    if filters.per_page > 100:
+        filters.per_page = 100
+    if filters.per_page < 1:
+        filters.per_page = 20
+    if filters.page < 1:
+        filters.page = 1
 
-    # Filter by published status based on authentication
-    if not request.auth:
-        queryset = queryset.filter(is_published=True)
+    # Validate order_by options
+    valid_order_fields = [
+        "created_at",
+        "-created_at",
+        "title",
+        "-title",
+        "updated_at",
+        "-updated_at",
+    ]
+    if filters.order_by not in valid_order_fields:
+        filters.order_by = "-created_at"
+
+    # Start with base queryset
+    queryset = Article.objects.select_related("creator", "community")
+
+    # Apply community filter (by ID or slug)
+    if filters.community_id or filters.community_slug:
+        try:
+            if filters.community_id and filters.community_slug:
+                # If both are provided, prioritize community_id but validate they match
+                community = get_object_or_404(
+                    Community,
+                    id=filters.community_id,
+                    slug=filters.community_slug,
+                    is_active=True,
+                )
+                queryset = queryset.filter(community_id=filters.community_id)
+            elif filters.community_id:
+                # Filter by community ID
+                community = get_object_or_404(
+                    Community, id=filters.community_id, is_active=True
+                )
+                queryset = queryset.filter(community_id=filters.community_id)
+            else:
+                # Filter by community slug
+                community = get_object_or_404(
+                    Community, slug=filters.community_slug, is_active=True
+                )
+                queryset = queryset.filter(community_id=community.id)
+        except Exception:
+            return 404, {"message": "Community not found"}
+
+    # Apply author filter
+    if filters.author_username:
+        queryset = queryset.filter(author__username=filters.author_username)
+
+    # Apply my_articles filter (overrides other filters if authenticated)
+    if filters.my_articles:
+        if not request.auth:
+            return 400, {"message": "Authentication required for my_articles filter"}
+        queryset = queryset.filter(creator=request.auth)
     else:
-        # Show published articles + user's own unpublished articles
-        from django.db.models import Q
+        # Handle published status filter for general articles
+        if filters.is_published is not None:
+            if not request.auth:
+                # Non-authenticated users can only see published articles
+                queryset = queryset.filter(is_published=True)
+            else:
+                if filters.is_published:
+                    # Show only published articles
+                    queryset = queryset.filter(is_published=True)
+                else:
+                    # Show only unpublished articles (only user's own)
+                    queryset = queryset.filter(is_published=False, creator=request.auth)
+        else:
+            # No published filter specified
+            if request.auth:
+                # Show published articles + user's unpublished articles
+                queryset = queryset.filter(
+                    Q(is_published=True) | Q(creator=request.auth)
+                )
+            else:
+                # Show only published articles for unauthenticated users
+                queryset = queryset.filter(is_published=True)
 
-        queryset = queryset.filter(Q(is_published=True) | Q(author=request.auth))
+    # Apply search filter
+    if filters.search:
+        search_term = filters.search.strip()
+        if search_term:
+            queryset = queryset.filter(
+                Q(title__icontains=search_term)
+                | Q(subtitle__icontains=search_term)
+                | Q(content__icontains=search_term)
+            )
 
-    return [ArticleListItem.resolve(article, request.auth) for article in queryset]
+    # Apply ordering
+    queryset = queryset.order_by(filters.order_by)
 
+    # Get total count before pagination
+    total_count = queryset.count()
 
-@router.get("/my-articles", response=List[ArticleListItem], auth=PseudonymousJWTAuth())
-@paginate(PageNumberPagination, page_size=20)
-def list_my_articles(request):
-    """
-    Get current user's articles (both published and unpublished).
-    Requires authentication.
-    """
-    queryset = (
-        Article.objects.select_related("community")
-        .filter(author=request.auth)
-        .order_by("-created_at")
+    # Apply pagination using Django's core Paginator
+    paginator = Paginator(queryset, filters.per_page)
+
+    # Handle page number validation
+    if filters.page > paginator.num_pages and paginator.num_pages > 0:
+        filters.page = paginator.num_pages
+
+    try:
+        page_obj = paginator.page(filters.page)
+    except Exception:
+        return 400, {"message": "Invalid page number"}
+
+    # Build pagination info
+    pagination_data = PaginationSchema(
+        current_page=filters.page,
+        total_pages=paginator.num_pages,
+        total_count=total_count,
+        has_next=page_obj.has_next(),
+        has_previous=page_obj.has_previous(),
+        page_size=filters.per_page,
+        next_page=page_obj.next_page_number() if page_obj.has_next() else None,
+        previous_page=(
+            page_obj.previous_page_number() if page_obj.has_previous() else None
+        ),
     )
 
-    return [ArticleListItem.resolve(article, request.auth) for article in queryset]
+    # Resolve articles
+    articles_data = [
+        ArticleDetails.resolve(article, request.auth)
+        for article in page_obj.object_list
+    ]
+
+    return ArticlesList(articles=articles_data, pagination=pagination_data)

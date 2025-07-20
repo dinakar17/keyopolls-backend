@@ -7,6 +7,7 @@ from ninja import NinjaAPI
 from ninja.errors import AuthenticationError, HttpError, HttpRequest, ValidationError
 from ninja.throttling import AnonRateThrottle, AuthRateThrottle
 
+from keyopolls.articles.api import router as articles_router
 from keyopolls.comments.api import router as comments_router
 from keyopolls.comments.api.search import router as comments_search_router
 from keyopolls.common.router import router as common_router
@@ -107,6 +108,7 @@ def generic_error_handler(request: HttpRequest, exc: Exception):
 api.add_router("/user", profile_router)
 api.add_router("/comments", comments_router)
 api.add_router("/comments/search", comments_search_router)
+api.add_router("/articles", articles_router)
 api.add_router("/communities", communities_router)
 api.add_router("/common", common_router)
 api.add_router("/polls", polls_router)

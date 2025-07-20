@@ -1,8 +1,9 @@
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from ninja import Schema
 
+from keyopolls.communities.models import CommunityMembership
 from keyopolls.profile.models import PseudonymousProfile
 
 
@@ -152,3 +153,75 @@ class CompleteGoogleRegistrationResponseSchema(Schema):
     token: str = None
     user: ProfileDetailsSchema = None
     error: str = None
+
+
+# Schemas
+class UserListItemSchema(Schema):
+    id: int
+    username: str
+    display_name: str
+    avatar: Optional[str] = None
+    total_aura: int
+    created_at: datetime
+
+    # Community-specific fields (only when filtering by community)
+    role: Optional[str] = None
+    joined_at: Optional[datetime] = None
+    is_active_member: Optional[bool] = None
+
+    @staticmethod
+    def resolve(
+        profile: PseudonymousProfile, membership: Optional[CommunityMembership] = None
+    ):
+        data = {
+            "id": profile.id,
+            "username": profile.username,
+            "display_name": profile.display_name,
+            "avatar": profile.avatar.url if profile.avatar else None,
+            "total_aura": profile.total_aura,
+            "created_at": profile.created_at,
+        }
+
+        # Add membership details if provided
+        if membership:
+            data.update(
+                {
+                    "role": membership.role,
+                    "joined_at": membership.joined_at,
+                    "is_active_member": membership.is_active_member,
+                }
+            )
+
+        return data
+
+
+class UsersListResponseSchema(Schema):
+    users: List[UserListItemSchema]
+    total_count: int
+    page: int
+    per_page: int
+    total_pages: int
+    has_next: bool
+    has_previous: bool
+
+
+class UsersListFiltersSchema(Schema):
+    search: Optional[str] = None
+    community_id: Optional[int] = None
+    role: Optional[str] = None
+    page: int = 1
+    per_page: int = 20
+    # Options: created_at, -created_at, username, -username, total_aura, -total_aura
+    order_by: str = "-created_at"
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "search": "john",
+                "community_id": 123,
+                "role": "member",
+                "page": 1,
+                "per_page": 20,
+                "order_by": "-created_at",
+            }
+        }

@@ -165,7 +165,7 @@ def update_community(
     membership = CommunityMembership.objects.filter(
         community=community, profile=profile
     ).first()
-    if not membership or membership.role not in ["creator", "admin"]:
+    if not membership or membership.role not in ["creator"]:
         return 403, {"message": "You do not have permission to update this community"}
 
     if data.description:

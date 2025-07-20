@@ -137,7 +137,7 @@ class CommunityMembership(models.Model):
     ROLE_CHOICES = [
         ("member", "Member"),
         ("moderator", "Moderator"),
-        ("admin", "Admin"),
+        ("recruiter", "Recruiter"),
         ("creator", "Creator"),
     ]
 
