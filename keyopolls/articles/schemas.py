@@ -1,10 +1,20 @@
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from ninja import Schema
 
 from keyopolls.articles.models import Article
 from keyopolls.common.schemas import PaginationSchema
+
+
+class TagSchema(Schema):
+    """Schema for tag representation"""
+
+    id: int
+    name: str
+    slug: str
+    description: Optional[str] = None
+    usage_count: int = 0
 
 
 class ArticleCreateSchema(Schema):
@@ -63,6 +73,8 @@ class ArticleDetails(Schema):
     share_count: int = 0
     comment_count: int = 0
 
+    tags: Optional[List[TagSchema]] = None
+
     # User interaction (only set when user is authenticated)
     is_author: bool = False
     user_reactions: Dict[str, bool] = {}
@@ -98,6 +110,22 @@ class ArticleDetails(Schema):
             # Check if bookmarked if you have a Bookmark model
             # is_bookmarked = Bookmark.is_bookmarked(profile, article)
 
+        # Get tags with full schema
+        tags = (
+            [
+                {
+                    "id": tag.id,
+                    "name": tag.name,
+                    "slug": tag.slug,
+                    "description": tag.description,
+                    "usage_count": tag.usage_count,
+                }
+                for tag in article.tags.all()
+            ]
+            if article.tags.exists()
+            else []
+        )
+
         return {
             "id": article.id,
             "title": article.title,
@@ -105,6 +133,7 @@ class ArticleDetails(Schema):
             "main_image_url": article.main_image.url if article.main_image else None,
             "link": article.link,
             "content": article.content,
+            "tags": tags,
             "author_name": article.author_name,
             "author_username": article.creator.username,
             "author_display_name": article.creator.display_name,

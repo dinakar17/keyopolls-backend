@@ -1,15 +1,18 @@
 import logging
 from typing import List
 
+from django.contrib.contenttypes.models import ContentType
 from django.db import models, transaction
 from django.http import HttpRequest
 from django.utils import timezone
+from django.utils.text import slugify
 from ninja import File, Router, UploadedFile
 from ninja.errors import ValidationError
 
+from keyopolls.common.models import Tag, TaggedItem
 from keyopolls.common.schemas import Message
 from keyopolls.communities.models import Community, CommunityMembership
-from keyopolls.polls.models import Poll, PollOption
+from keyopolls.polls.models import Poll, PollOption, PollTodo
 from keyopolls.polls.schemas import (
     PollCreateError,
     PollCreateSchema,
@@ -168,6 +171,17 @@ def create_poll(
         if not data.explanation or len(data.explanation.strip()) < 250:
             return 400, {"message": "Explanation must be at least 250 characters"}
 
+        # Validate todos
+        if hasattr(data, "todos") and data.todos:
+            if len(data.todos) > 5:
+                return 400, {"message": "Cannot create more than 5 todos per poll"}
+
+            for todo in data.todos:
+                if not todo.text or len(todo.text.strip()) == 0:
+                    return 400, {"message": "Todo text cannot be empty"}
+                if len(todo.text.strip()) > 400:
+                    return 400, {"message": "Todo text cannot exceed 400 characters"}
+
         # Validate option images
         if option_images:
             if data.poll_type == "text_input":
@@ -177,15 +191,49 @@ def create_poll(
                 if len(option_images) > len(data.options):
                     return 400, {"message": "Too many images provided for options"}
 
+        # Validate tags
+        if hasattr(data, "tags") and data.tags:
+            if len(data.tags) > 5:  # Limit to 5 tags max
+                return 400, {"message": "Poll cannot have more than 5 tags"}
+
+            # Validate each tag
+            for tag_name in data.tags:
+                if not tag_name or len(tag_name.strip()) == 0:
+                    return 400, {"message": "Tag name cannot be empty"}
+                if len(tag_name.strip()) > 50:
+                    return 400, {"message": "Tag name cannot exceed 50 characters"}
+                # Check for valid characters (letters, numbers, hyphens, underscores)
+                if (
+                    not tag_name.replace("-", "")
+                    .replace("_", "")
+                    .replace(" ", "")
+                    .isalnum()
+                ):
+                    return 400, {
+                        "message": f"Tag '{tag_name}' contains invalid characters"
+                    }
+
         # Check daily poll limit (3 polls per day per community)
         today = timezone.now().date()
         daily_poll_count = Poll.objects.filter(
             profile=profile, community=community, created_at__date=today
         ).count()
 
-        if daily_poll_count >= 3:
+        if daily_poll_count >= 10:
             return 400, {
-                "message": "You can only create 3 polls per day in this community"
+                "message": "You can only create 10 polls per day in this community"
+            }
+
+        # Check if user is creator or moderator
+        is_creator = community.profile.id == profile.id
+        is_moderator = False
+
+        if membership:
+            is_moderator = membership.can_moderate
+
+        if not (is_creator or is_moderator):
+            return 403, {
+                "message": "Only community creators and moderators can create polls"
             }
 
         # Use database transaction
@@ -254,6 +302,38 @@ def create_poll(
                     if option_images and i < len(option_images):
                         option.image = option_images[i]
                         option.save()
+
+            # Create todos
+            if hasattr(data, "todos") and data.todos:
+                for todo in data.todos:
+                    todo_text = todo.text.strip()
+                    if todo_text:  # Skip empty todos
+                        PollTodo.objects.create(
+                            poll=poll, profile=profile, text=todo_text
+                        )
+
+            # Handle tags
+            if hasattr(data, "tags") and data.tags:
+                poll_content_type = ContentType.objects.get_for_model(Poll)
+
+                for tag_name in data.tags:
+                    tag_name = tag_name.strip().lower()  # Normalize tag name
+                    if tag_name:  # Skip empty tags
+                        # Generate slug
+                        tag_slug = slugify(tag_name)
+
+                        # Get or create the tag
+                        tag, created = Tag.objects.get_or_create(
+                            name=tag_name, defaults={"slug": tag_slug}
+                        )
+
+                        # Create the TaggedItem relationship
+                        TaggedItem.objects.get_or_create(
+                            tag=tag,
+                            content_type=poll_content_type,
+                            object_id=poll.id,
+                            community=community,
+                        )
 
             # Update community poll count
             community.poll_count = models.F("poll_count") + 1

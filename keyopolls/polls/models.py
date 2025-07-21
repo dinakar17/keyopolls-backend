@@ -480,3 +480,46 @@ class PollTextAggregate(models.Model):
         if self.poll.total_voters == 0:
             return 0
         return round((self.response_count / self.poll.total_voters) * 100, 1)
+
+
+class PollTodo(models.Model):
+    """Simple todo items for polls"""
+
+    id = models.BigAutoField(primary_key=True)
+    poll = models.ForeignKey(
+        "polls.Poll", on_delete=models.CASCADE, related_name="todos"
+    )
+    profile = models.ForeignKey(
+        "profile.PseudonymousProfile",
+        on_delete=models.CASCADE,
+        related_name="poll_todos",
+    )
+
+    text = models.CharField(max_length=200)
+    is_completed = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(default=timezone.now)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["poll", "-created_at"]),
+            models.Index(fields=["profile", "-created_at"]),
+        ]
+        ordering = ["is_completed", "-created_at"]
+
+    def __str__(self):
+        status = "✅" if self.is_completed else "⏳"
+        return f"{status} {self.text}"
+
+    def mark_completed(self):
+        """Mark todo as completed"""
+        self.is_completed = True
+        self.completed_at = timezone.now()
+        self.save()
+
+    def mark_incomplete(self):
+        """Mark todo as incomplete"""
+        self.is_completed = False
+        self.completed_at = None
+        self.save()

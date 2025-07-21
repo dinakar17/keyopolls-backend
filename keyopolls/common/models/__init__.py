@@ -70,6 +70,7 @@ class Tag(models.Model):
 
     name = models.CharField(max_length=50, unique=True)
     slug = models.SlugField(max_length=50, unique=True)
+    description = models.TextField(blank=True, null=True)
     usage_count = models.BigIntegerField(default=0)  # Denormalized counter
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -89,6 +90,7 @@ class Tag(models.Model):
             "id": self.id,
             "name": self.name,
             "slug": self.slug,
+            "description": self.description,
             "usage_count": self.usage_count,
         }
 
@@ -97,8 +99,15 @@ class TaggedItem(models.Model):
     """Intermediate model for connecting tags to any model"""
 
     tag = models.ForeignKey(Tag, on_delete=models.CASCADE, related_name="items")
+    community = models.ForeignKey(
+        "communities.Community",
+        on_delete=models.CASCADE,
+        related_name="tagged_items",
+        blank=True,
+        null=True,
+    )
 
-    # Generic relation fields
+    # Generic relation fields (for poll and article tagging)
     content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
     object_id = models.PositiveIntegerField()
     content_object = GenericForeignKey("content_type", "object_id")

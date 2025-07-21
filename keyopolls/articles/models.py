@@ -1,7 +1,8 @@
+from django.contrib.contenttypes.fields import GenericRelation
 from django.db import models
 from django.utils import timezone
 
-from keyopolls.common.models import ImpressionTrackingMixin
+from keyopolls.common.models import ImpressionTrackingMixin, TaggedItem
 from keyopolls.communities.models import Community
 from keyopolls.profile.models import PseudonymousProfile
 
@@ -33,6 +34,9 @@ class Article(models.Model, ImpressionTrackingMixin):
         PseudonymousProfile, on_delete=models.CASCADE, related_name="articles"
     )
 
+    # Add this line for tags relationship
+    tagged_items = GenericRelation(TaggedItem)
+
     likes_count = models.PositiveIntegerField(default=0, editable=False)
     dislikes_count = models.PositiveIntegerField(default=0, editable=False)
     shares_count = models.PositiveIntegerField(default=0, editable=False)
@@ -42,6 +46,13 @@ class Article(models.Model, ImpressionTrackingMixin):
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
     is_published = models.BooleanField(default=False)
+
+    @property
+    def tags(self):
+        """Property to get tags for this article"""
+        from keyopolls.common.models import Tag
+
+        return Tag.objects.filter(items__content_object=self)
 
     class Meta:
         ordering = ["-created_at"]

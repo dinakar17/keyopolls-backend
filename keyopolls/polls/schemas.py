@@ -21,6 +21,10 @@ class PollOptionCreateSchema(Schema):
     # Note: image will be handled separately via file upload
 
 
+class TodoItemSchema(Schema):
+    text: str
+
+
 class PollCreateSchema(Schema):
     title: str
     description: Optional[str] = ""
@@ -28,6 +32,7 @@ class PollCreateSchema(Schema):
     community_id: int
 
     explanation: Optional[str] = None  # Explanation for correct answers (optional)
+    todos: Optional[List[TodoItemSchema]] = None  # List of todo items
 
     # Poll settings
     allow_multiple_votes: bool = False
@@ -42,6 +47,8 @@ class PollCreateSchema(Schema):
 
     # Options (not used for text_input polls)
     options: List[PollOptionCreateSchema] = []
+
+    tags: Optional[List[str]] = None  # Tags for categorization
 
 
 class PollUpdateSchema(Schema):
