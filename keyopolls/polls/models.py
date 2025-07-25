@@ -163,8 +163,8 @@ class Poll(models.Model, ImpressionTrackingMixin):
         if self.requires_aura > 0 and profile.total_aura < self.requires_aura:
             return False
 
-        # Check membership only for private and restricted communities
-        if self.community.community_type in ["private", "restricted"]:
+        # Check membership for private, restricted, or public communities
+        if self.community.community_type in ["private", "restricted", "public"]:
             try:
                 membership = self.community.memberships.get(profile=profile)
                 if not membership.is_active_member:

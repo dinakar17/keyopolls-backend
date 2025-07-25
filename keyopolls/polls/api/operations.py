@@ -225,7 +225,9 @@ def create_poll(
             }
 
         # Check if user is creator or moderator
-        is_creator = community.profile.id == profile.id
+        is_creator = community.memberships.filter(
+            profile=profile, role="creator", status="active"
+        ).exists()
         is_moderator = False
 
         if membership:

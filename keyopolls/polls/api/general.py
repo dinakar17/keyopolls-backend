@@ -60,7 +60,9 @@ def cast_vote(request, data: CastVoteSchema):
                     "message": f"You need at least {poll.requires_aura} aura to vote",
                 }
             return 403, {
-                "message": "You are not authorized to vote on this poll",
+                "message": (
+                    "You need to be a member of the community to vote on this poll"
+                ),
             }
 
         # Check if user has already voted/responded

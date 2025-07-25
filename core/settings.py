@@ -273,14 +273,6 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL")
 ZEPTOMAIL_API_KEY = config("ZEPTOMAIL_API_KEY")
 
-# Twilio settings
-TWILIO_ACCOUNT_SID = config("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN = config("TWILIO_AUTH_TOKEN")
-TWILIO_PHONE_NUMBER = config("TWILIO_PHONE_NUMBER")
-
-# MSG91 settings
-MSG91_AUTH_KEY = config("MSG91_AUTH_KEY")
-MSG91_TEMPLATE_ID = config("MSG91_TEMPLATE_ID")
 
 FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000")
 
@@ -294,11 +286,6 @@ AWS_S3_FILE_OVERWRITE = False
 
 # Authentication keys
 PSEUDONYMOUS_SECRET_KEY = config("PSEUDONYMOUS_SECRET_KEY")
-
-# Cashfree settings
-CASHFREE_CLIENT_ID = config("CASHFREE_CLIENT_ID")
-CASHFREE_CLIENT_SECRET = config("CASHFREE_CLIENT_SECRET")
-CASHFREE_PUBLIC_KEY = config("CASHFREE_PUBLIC_KEY")
 
 # Firebase configuration
 FCM_CREDENTIALS_JSON = config("FCM_CREDENTIALS", default=None)
@@ -337,8 +324,6 @@ GEOIP_PATH = os.path.join(BASE_DIR, "geoip")
 
 # Configure to use only the Country s
 GEOIP_COUNTRY = "GeoLite2-Country.mmdb"
-
-ANTHROPIC_API_KEY = config("ANTHROPIC_API_KEY")
 
 
 def setup_logging():
