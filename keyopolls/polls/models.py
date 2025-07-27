@@ -165,13 +165,15 @@ class Poll(models.Model, ImpressionTrackingMixin):
 
         # Generate slug if not provided
         if not self.slug:
-            base_slug = slugify(self.title)
+            base_slug = slugify(self.title)[:90]  # Reserve space for counter suffix
             slug = base_slug
             counter = 1
 
-            # Ensure slug uniqueness
+            # Ensure slug uniqueness and length limit
             while Poll.objects.filter(slug=slug).exclude(pk=self.pk).exists():
-                slug = f"{base_slug}-{counter}"
+                suffix = f"-{counter}"
+                max_base_length = 100 - len(suffix)
+                slug = f"{base_slug[:max_base_length]}{suffix}"
                 counter += 1
 
             self.slug = slug
