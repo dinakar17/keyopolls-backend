@@ -213,10 +213,10 @@ def cast_vote(request, data: CastVoteSchema):
                 # Return enhanced poll details with answer result
                 poll_details = PollDetails.resolve(poll, profile)
 
-                # Add answer result info to response
-                poll_details.user_answer_correct = answer_result["is_correct"]
-                poll_details.user_earned_aura = answer_result["aura_earned"]
-                poll_details.user_streak_info = answer_result["streak_info"]
+                # # Add answer result info to response
+                # poll_details.user_answer_correct = answer_result["is_correct"]
+                # poll_details.user_earned_aura = answer_result["aura_earned"]
+                # poll_details.user_streak_info = answer_result["streak_info"]
 
                 return 200, poll_details
 

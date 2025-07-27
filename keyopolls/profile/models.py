@@ -34,6 +34,7 @@ class PseudonymousProfile(models.Model):
     )
 
     # Aura scores
+    total_aura = models.IntegerField(default=0)
     aura_polls = models.IntegerField(default=0)
     aura_comments = models.IntegerField(default=0)
 
@@ -53,11 +54,6 @@ class PseudonymousProfile(models.Model):
 
     def __str__(self):
         return f"{self.username} ({self.display_name})"
-
-    @property
-    def total_aura(self):
-        """Calculate total aura score"""
-        return self.aura_polls + self.aura_comments
 
     @property
     def is_profile_complete(self):

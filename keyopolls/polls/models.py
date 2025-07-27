@@ -335,7 +335,7 @@ class PollOption(models.Model):
     poll = models.ForeignKey(Poll, on_delete=models.CASCADE, related_name="options")
 
     # Option content
-    text = models.CharField(max_length=200, blank=True)
+    text = models.CharField(blank=True)
     image = models.ImageField(upload_to="poll_options/", null=True, blank=True)
 
     # Correct answer flag
@@ -655,7 +655,7 @@ class AuraTransaction(models.Model):
     # Transaction details
     transaction_type = models.CharField(max_length=30, choices=TRANSACTION_TYPES)
     amount = models.IntegerField()  # Can be negative for deductions
-    description = models.CharField(max_length=200, blank=True)
+    description = models.CharField(blank=True)
 
     # Related objects (optional)
     poll = models.ForeignKey(

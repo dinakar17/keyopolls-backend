@@ -16,6 +16,7 @@ from keyopolls.polls.models import (
     Poll,
     PollAnswerResult,
 )
+from keyopolls.profile.models import PseudonymousProfile
 
 
 class StreakService:
@@ -95,7 +96,9 @@ class StreakService:
         return False
 
     @classmethod
-    def award_aura_for_poll(cls, profile, poll: Poll, is_correct: bool) -> int:
+    def award_aura_for_poll(
+        cls, profile: PseudonymousProfile, poll: Poll, is_correct: bool
+    ) -> int:
         """
         Award aura to user for poll participation
 
@@ -165,7 +168,9 @@ class StreakService:
                 cls._update_streak_record(profile, community, activity_date)
 
             # Get updated streak info
-            streak = CommunityStreak.objects.get(profile=profile, community=community)
+            streak, created = CommunityStreak.objects.get_or_create(
+                profile=profile, community=community
+            )
 
             return {
                 "current_streak": streak.current_streak,
@@ -238,12 +243,9 @@ class StreakService:
         start_date = end_date - timedelta(days=days - 1)
 
         # Get streak record
-        try:
-            streak = CommunityStreak.objects.get(profile=profile, community=community)
-        except CommunityStreak.DoesNotExist:
-            streak = CommunityStreak(
-                profile=profile, community=community, current_streak=0, max_streak=0
-            )
+        streak, created = CommunityStreak.objects.get_or_create(
+            profile=profile, community=community
+        )
 
         # Get activity data for the date range
         activities = CommunityStreakActivity.objects.filter(
@@ -314,8 +316,10 @@ class StreakService:
                 {
                     "community_id": streak.community.id,
                     "community_name": streak.community.name,
-                    "current_streak": streak.current_streak,
-                    "max_streak": streak.max_streak,
+                    "current_streak": (
+                        streak.current_streak if streak.current_streak else 0
+                    ),
+                    "max_streak": streak.max_streak if streak.max_streak else 0,
                     "last_activity_date": (
                         streak.last_activity_date.isoformat()
                         if streak.last_activity_date
