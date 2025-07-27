@@ -3,7 +3,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.db import models
 from django.utils import timezone
 
-from keyopolls.common.models.bookmark import Bookmark, BookmarkFolder
+from keyopolls.common.models.bookmark import Bookmark, BookmarkFolder, FolderAccess
 from keyopolls.common.models.impressions import Impression, ImpressionTrackingMixin
 from keyopolls.common.models.media import Link, Media, UploadedImage
 from keyopolls.common.models.reaction import Reaction, Share
@@ -19,6 +19,7 @@ __all__ = [
     "Impression",
     "Reaction",
     "Share",
+    "FolderAccess",
 ]
 
 

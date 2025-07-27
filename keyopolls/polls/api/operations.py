@@ -219,9 +219,9 @@ def create_poll(
             profile=profile, community=community, created_at__date=today
         ).count()
 
-        if daily_poll_count >= 10:
+        if daily_poll_count >= 20:
             return 400, {
-                "message": "You can only create 10 polls per day in this community"
+                "message": "You can only create 20 polls per day in this community"
             }
 
         # Check if user is creator or moderator
@@ -268,7 +268,7 @@ def create_poll(
             # Add poll-type-specific fields
             if data.poll_type == "text_input":
                 # For text input polls, only add relevant fields
-                if data.has_correct_answer and data.correct_text_answer:
+                if data.correct_text_answer:
                     poll_data["correct_text_answer"] = data.correct_text_answer.strip()
             elif data.poll_type == "multiple":
                 # For multiple choice polls
@@ -276,7 +276,7 @@ def create_poll(
                 poll_data["max_choices"] = data.max_choices
             elif data.poll_type == "ranking":
                 # For ranking polls
-                if data.has_correct_answer and data.correct_ranking_order:
+                if data.correct_ranking_order:
                     poll_data["correct_ranking_order"] = data.correct_ranking_order
 
             # Create the poll (with active status)
@@ -295,9 +295,7 @@ def create_poll(
                         poll=poll,
                         text=option_data.text.strip(),
                         order=option_data.order,
-                        is_correct=(
-                            option_data.is_correct if data.has_correct_answer else False
-                        ),
+                        is_correct=(option_data.is_correct),
                     )
 
                     # Add image if provided
@@ -380,7 +378,7 @@ def create_poll(
     },
 )
 def update_poll(request: HttpRequest, poll_id: int, data: PollUpdateSchema):
-    """Update poll title and description only"""
+    """Update poll title, description, explanation, and tags"""
     profile = request.auth
 
     try:
@@ -398,18 +396,75 @@ def update_poll(request: HttpRequest, poll_id: int, data: PollUpdateSchema):
         if not data.title.strip():
             return 400, {"message": "Title cannot be empty"}
 
-        # Update only title and description
-        poll.title = data.title.strip()
-        poll.description = data.description.strip()
-        poll.save(update_fields=["title", "description", "updated_at"])
+        # Validate explanation if provided
+        if hasattr(data, "explanation") and data.explanation is not None:
+            if len(data.explanation.strip()) < 250:
+                return 400, {"message": "Explanation must be at least 250 characters"}
+
+        # Validate tags if provided
+        if hasattr(data, "tags") and data.tags:
+            if len(data.tags) > 5:
+                return 400, {"message": "Poll cannot have more than 5 tags"}
+
+            for tag_name in data.tags:
+                if not tag_name or len(tag_name.strip()) == 0:
+                    return 400, {"message": "Tag name cannot be empty"}
+                if len(tag_name.strip()) > 50:
+                    return 400, {"message": "Tag name cannot exceed 50 characters"}
+                if (
+                    not tag_name.replace("-", "")
+                    .replace("_", "")
+                    .replace(" ", "")
+                    .isalnum()
+                ):
+                    return 400, {
+                        "message": f"Tag '{tag_name}' contains invalid characters"
+                    }
+
+        with transaction.atomic():
+            # Update basic fields
+            poll.title = data.title.strip()
+            poll.description = data.description.strip()
+
+            update_fields = ["title", "description", "updated_at"]
+
+            # Update explanation if provided
+            if hasattr(data, "explanation") and data.explanation is not None:
+                poll.explanation = data.explanation.strip()
+                update_fields.append("explanation")
+
+            poll.save(update_fields=update_fields)
+
+            # Handle tags if provided
+            if hasattr(data, "tags") and data.tags is not None:
+                poll_content_type = ContentType.objects.get_for_model(Poll)
+
+                # Remove existing tags
+                TaggedItem.objects.filter(
+                    content_type=poll_content_type, object_id=poll.id
+                ).delete()
+
+                # Add new tags
+                for tag_name in data.tags:
+                    tag_name = tag_name.strip().lower()
+                    if tag_name:
+                        tag_slug = slugify(tag_name)
+                        tag, created = Tag.objects.get_or_create(
+                            name=tag_name, defaults={"slug": tag_slug}
+                        )
+                        TaggedItem.objects.get_or_create(
+                            tag=tag,
+                            content_type=poll_content_type,
+                            object_id=poll.id,
+                            community=poll.community,
+                        )
 
         return 200, PollDetails.resolve(poll, profile)
 
     except Exception as e:
         logger.error(f"Error updating poll {poll_id}: {str(e)}", exc_info=True)
         return 400, {
-            "success": False,
-            "error": "An error occurred while updating the poll",
+            "message": "An error occurred while updating the poll",
         }
 
 

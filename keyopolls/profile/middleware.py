@@ -58,7 +58,7 @@ def generate_pseudonymous_access_token(pseudonymous_profile_id: int) -> str:
     payload = {
         "user_id": pseudonymous_profile_id,
         "iat": now,  # Issued at timestamp
-        "exp": now + timedelta(days=7),  # Expires in 7 days
+        "exp": now + timedelta(days=30),  # Expires in 7 days
     }
 
     # Generate JWT token

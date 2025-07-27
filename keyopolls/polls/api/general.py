@@ -6,13 +6,16 @@ from django.db import models, transaction
 from django.http import HttpRequest
 from ninja import Query, Router
 
-from keyopolls.common.models import Category
+from keyopolls.common.models import Category, TaggedItem
 from keyopolls.common.models.impressions import record_list_impressions
 from keyopolls.common.schemas import Message
 from keyopolls.communities.models import Community, CommunityMembership
-from keyopolls.polls.models import Poll, PollTextResponse, PollVote
+from keyopolls.polls.models import Poll, PollTextAggregate, PollTextResponse, PollVote
 from keyopolls.polls.schemas import CastVoteSchema, PollDetails, PollListResponseSchema
 from keyopolls.polls.services import validate_vote_for_poll_type
+
+# NEW: Process answer with streak service
+from keyopolls.polls.services.streak_service import StreakService
 from keyopolls.profile.middleware import (
     OptionalPseudonymousJWTAuth,
     PseudonymousJWTAuth,
@@ -119,15 +122,24 @@ def cast_vote(request, data: CastVoteSchema):
                 # Update poll counts (new voter)
                 poll.increment_vote_count(is_new_voter=True)
 
-                # Update aggregates
-                from keyopolls.polls.models import PollTextAggregate
+                answer_result = StreakService.process_poll_answer(
+                    profile=profile, poll=poll, text_response=text_value
+                )
 
                 PollTextAggregate.update_aggregates_for_poll(poll)
 
                 # Refresh poll data to get updated counts
                 poll.refresh_from_db()
 
-                return 200, PollDetails.resolve(poll, profile)
+                # Return enhanced poll details with answer result
+                poll_details = PollDetails.resolve(poll, profile)
+
+                # Add answer result info to response
+                poll_details.user_answer_correct = answer_result["is_correct"]
+                poll_details.user_earned_aura = answer_result["aura_earned"]
+                poll_details.user_streak_info = answer_result["streak_info"]
+
+                return 200, poll_details
 
         # Handle option-based polls (single, multiple, ranking)
         else:
@@ -154,7 +166,6 @@ def cast_vote(request, data: CastVoteSchema):
 
             # Cast the votes using transaction
             with transaction.atomic():
-                # is_new_voter = True  # Since we checked they haven't voted before
                 votes_created = []
 
                 for vote_data in data.votes:
@@ -173,7 +184,6 @@ def cast_vote(request, data: CastVoteSchema):
                 if poll.poll_type == "ranking":
                     # For ranking polls: each user contributes 1 to total_voters
                     # and total_votes equals total_voters
-                    # (since each user ranks all options)
                     poll.increment_vote_count(is_new_voter=True)
                 else:
                     # For single/multiple choice: count each individual vote
@@ -187,10 +197,28 @@ def cast_vote(request, data: CastVoteSchema):
                         )
                         poll.save(update_fields=["total_votes"])
 
+                # Convert votes to format expected by streak service
+                user_votes = [
+                    {"option_id": vote_data.option_id, "rank": vote_data.rank}
+                    for vote_data in data.votes
+                ]
+
+                answer_result = StreakService.process_poll_answer(
+                    profile=profile, poll=poll, user_votes=user_votes
+                )
+
                 # Refresh poll data to get updated counts
                 poll.refresh_from_db()
 
-                return 200, PollDetails.resolve(poll, profile)
+                # Return enhanced poll details with answer result
+                poll_details = PollDetails.resolve(poll, profile)
+
+                # Add answer result info to response
+                poll_details.user_answer_correct = answer_result["is_correct"]
+                poll_details.user_earned_aura = answer_result["aura_earned"]
+                poll_details.user_streak_info = answer_result["streak_info"]
+
+                return 200, poll_details
 
     except Exception as e:
         logger.error(
@@ -257,7 +285,9 @@ def list_polls(
         ),
     ),
     author_id: Optional[int] = Query(None, description="Filter by author profile ID"),
-    tag: Optional[str] = Query(None, description="Filter by tag name"),
+    tags: Optional[List[str]] = Query(
+        None, description="Filter by multiple tag slugs (AND operation)"
+    ),
     # Search
     search: Optional[str] = Query(
         None, description="Search in poll title and description"
@@ -574,6 +604,50 @@ def list_polls(
         #         models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now)
         #     )
         #     applied_filters["exclude_expired"] = True
+
+        # === TAG FILTERING ===
+        # Handle both 'tags' and 'tags[]' query parameter formats
+        tag_filters = tags or []
+
+        # Also check for 'tags[]' format in request.GET
+        if not tag_filters and hasattr(request, "GET"):
+            tags_array = request.GET.getlist("tags[]")
+            if tags_array:
+                tag_filters = tags_array
+
+        if tag_filters:
+            from django.contrib.contenttypes.models import ContentType
+
+            # Get ContentType for Poll model
+            poll_content_type = ContentType.objects.get_for_model(Poll)
+
+            # Find TaggedItems that match our tag slugs and are associated with polls
+            tagged_poll_ids = TaggedItem.objects.filter(
+                tag__slug__in=tag_filters, content_type=poll_content_type
+            ).values_list("object_id", flat=True)
+
+            # If we have multiple tags, we need to ensure polls have ALL tags
+            # (AND operation)
+            if len(tag_filters) > 1:
+                # Count how many of the requested tags each poll has
+                from django.db.models import Count
+
+                poll_tag_counts = (
+                    TaggedItem.objects.filter(
+                        tag__slug__in=tag_filters, content_type=poll_content_type
+                    )
+                    .values("object_id")
+                    .annotate(tag_count=Count("tag__slug", distinct=True))
+                    .filter(tag_count=len(tag_filters))
+                    .values_list("object_id", flat=True)
+                )
+
+                polls = polls.filter(id__in=poll_tag_counts)
+            else:
+                # Single tag
+                polls = polls.filter(id__in=tagged_poll_ids)
+
+            applied_filters["tags"] = tag_filters
 
         # Search functionality
         if search:

@@ -13,6 +13,7 @@ from keyopolls.common.schemas import Message
 from keyopolls.communities.models import Community, CommunityMembership
 from keyopolls.communities.schemas import CommunityDetails, CommunityListResponse
 from keyopolls.profile.middleware import OptionalPseudonymousJWTAuth
+from keyopolls.profile.models import PseudonymousProfile
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,9 @@ def get_community(request: HttpRequest, community_slug: str):
     Get a single community by ID.
     Handles all visibility rules and user-specific data.
     """
-    user_profile = getattr(request, "auth", None)
+    user_profile = (
+        request.auth if isinstance(request.auth, PseudonymousProfile) else None
+    )
 
     try:
         # Get community with optimized queries
@@ -122,7 +125,9 @@ def list_communities(request: HttpRequest, filters: CommunityListQuery = Query()
     List communities with comprehensive filtering, searching, and pagination.
     Handles all possible use cases in a single endpoint.
     """
-    user_profile = getattr(request, "auth", None)
+    user_profile = (
+        request.auth if isinstance(request.auth, PseudonymousProfile) else None
+    )
 
     try:
         # Validate parameters

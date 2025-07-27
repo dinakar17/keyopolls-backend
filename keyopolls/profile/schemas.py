@@ -215,7 +215,7 @@ class UsersListFiltersSchema(Schema):
     order_by: str = "-created_at"
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "search": "john",
                 "community_id": 123,

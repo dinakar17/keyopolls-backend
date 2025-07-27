@@ -1,5 +1,6 @@
 from keyopolls.utils.contentUtils import (
     decrement_aura,
+    generate_youtube_like_id,
     get_content_object,
     increment_aura,
     record_list_impressions,
@@ -30,4 +31,5 @@ __all__ = [
     "validate_media_file",
     "increment_aura",
     "decrement_aura",
+    "generate_youtube_like_id",
 ]

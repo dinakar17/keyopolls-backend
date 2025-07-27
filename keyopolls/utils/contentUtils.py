@@ -1,4 +1,5 @@
 import logging
+import secrets
 from typing import Any, Dict
 
 from django.apps import apps
@@ -180,3 +181,16 @@ def decrement_aura(profile, aura_type, amount):
         "aura_comments": profile.aura_comments,
         "total_aura": profile.total_aura,
     }
+
+
+def generate_youtube_like_id():
+    """
+    Generate an 11-character YouTube-like ID
+    YouTube uses base64url encoding: A-Z, a-z, 0-9, -, _
+    This mimics YouTube's actual ID generation pattern
+    """
+    # YouTube's character set (base64url)
+    chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ" "abcdefghijklmnopqrstuvwxyz" "0123456789" "-_"
+
+    # Use cryptographically secure random for better uniqueness
+    return "".join(secrets.choice(chars) for _ in range(11))

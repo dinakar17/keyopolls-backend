@@ -1,10 +1,11 @@
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
+from django.contrib.contenttypes.models import ContentType
 from ninja import Schema
 
-from keyopolls.common.models import Bookmark, Reaction
-from keyopolls.polls.models import Poll
+from keyopolls.common.models import Bookmark, Reaction, TaggedItem
+from keyopolls.polls.models import Poll, PollTodo, PollVote
 from keyopolls.polls.services import (
     calculate_multiple_choice_distribution,
     calculate_option_ranking_results,
@@ -22,7 +23,15 @@ class PollOptionCreateSchema(Schema):
 
 
 class TodoItemSchema(Schema):
+    id: Optional[int] = None
     text: str
+
+    def resolve(todo: PollTodo) -> Dict[str, str]:
+        """Resolve PollTodo to dictionary"""
+        return {
+            "id": todo.id if todo.id else None,
+            "text": todo.text,
+        }
 
 
 class PollCreateSchema(Schema):
@@ -40,10 +49,13 @@ class PollCreateSchema(Schema):
     requires_aura: int = 0
     expires_at: Optional[datetime] = None  # Poll expiration time
 
-    # Correct answers feature
+    # Correct answers feature (For single and multiple choice polls
+    # correct answers are present in options)
     has_correct_answer: bool = False
     correct_text_answer: Optional[str] = None  # For text input polls
-    correct_ranking_order: Optional[List[int]] = None  # Option IDs in correct order
+    correct_ranking_order: Optional[List[int]] = (
+        None  # Option IDs in correct order for ranking polls
+    )
 
     # Options (not used for text_input polls)
     options: List[PollOptionCreateSchema] = []
@@ -54,6 +66,8 @@ class PollCreateSchema(Schema):
 class PollUpdateSchema(Schema):
     title: str
     description: str = ""
+    tags: Optional[List[str]] = None  # Tags for categorization
+    explanation: Optional[str] = None  # Explanation for correct answers (optional)
 
 
 # Vote Input Schemas
@@ -199,6 +213,7 @@ class PollDetails(Schema):
     image_url: Optional[str] = None  # Poll image (especially for text input polls)
     poll_type: str
     status: str
+    tags: List[str] = []  # List of tag slugs
 
     # Author info
     author_username: str
@@ -221,9 +236,19 @@ class PollDetails(Schema):
     # Correct answers
     has_correct_answer: bool
     correct_answer_stats: Optional[CorrectAnswerStats] = None
+    correct_ranking_order: Optional[List[int]] = None  # For ranking polls
+    correct_text_answer: Optional[str] = None  # For text input polls
+
+    # NEW: Answer tracking fields
+    user_answer_correct: Optional[bool] = None
+    user_earned_aura: Optional[int] = None
+    user_streak_info: Optional[Dict[str, Any]] = None
 
     # Status
     is_active: bool
+
+    # Poll Todos
+    todos: List[TodoItemSchema] = []  # List of todo items (if applicable)
 
     # Counts
     total_votes: int
@@ -301,9 +326,9 @@ class PollDetails(Schema):
                     user_has_voted = False
             else:
                 # Get user's votes for option-based polls
-                user_poll_votes = poll.votes.filter(profile=profile).select_related(
-                    "option"
-                )
+                user_poll_votes = PollVote.objects.filter(
+                    poll=poll, profile=profile
+                ).select_related("option")
                 user_has_voted = user_poll_votes.exists()
 
                 # Extract user vote details
@@ -389,6 +414,13 @@ class PollDetails(Schema):
                     for option in poll.options.all().order_by("order")
                 ]
 
+        poll_content_type = ContentType.objects.get_for_model(poll)
+        tagged_items = TaggedItem.objects.filter(
+            content_type=poll_content_type, object_id=poll.id
+        ).select_related("tag")
+
+        tags_data = [tagged_item.tag.slug for tagged_item in tagged_items]
+
         return {
             "id": poll.id,
             "title": poll.title,
@@ -397,6 +429,7 @@ class PollDetails(Schema):
             "image_url": poll.image.url if poll.image else None,
             "poll_type": poll.poll_type,
             "status": poll.status,
+            "tags": tags_data,  # Returns list of tag slugs
             "author_username": poll.profile.username,
             "author_display_name": poll.profile.display_name,
             "author_avatar": (poll.profile.avatar.url if poll.profile.avatar else None),
@@ -411,8 +444,15 @@ class PollDetails(Schema):
             "max_choices": poll.max_choices,
             "requires_aura": poll.requires_aura,
             "is_pinned": poll.is_pinned,
+            "todos": [TodoItemSchema.resolve(todo) for todo in poll.todos.all()],
             "has_correct_answer": poll.has_correct_answer,
             "correct_answer_stats": correct_answer_stats,
+            "correct_ranking_order": (
+                poll.correct_ranking_order if poll.poll_type == "ranking" else None
+            ),
+            "correct_text_answer": (
+                poll.correct_text_answer if poll.poll_type == "text_input" else None
+            ),
             "is_active": poll.is_active,
             "total_votes": poll.total_votes,
             "total_voters": poll.total_voters,
@@ -447,3 +487,61 @@ class PollListResponseSchema(Schema):
     page_size: int
     has_next: bool
     has_previous: bool
+
+
+# Streak-related schemas
+class CommunityStreakSchema(Schema):
+    """Community streak information"""
+
+    community_id: int
+    community_name: str
+    current_streak: int
+    max_streak: int
+    last_activity_date: Optional[str] = None  # ISO date string
+    streak_start_date: Optional[str] = None  # ISO date string
+
+
+class CommunityStreakSummarySchema(Schema):
+    """Summary of user's streak in a community"""
+
+    community_id: int
+    community_name: str
+    current_streak: int
+    max_streak: int
+    last_activity_date: Optional[str] = None
+    is_active: bool
+
+
+class StreakCalendarDaySchema(Schema):
+    """Single day in streak calendar"""
+
+    date: str  # ISO date string
+    polls_count: int
+    target_met: bool
+    is_today: bool
+
+
+class StreakCalendarSchema(Schema):
+    """Complete streak calendar data"""
+
+    current_streak: int
+    max_streak: int
+    streak_start_date: Optional[str] = None
+    last_activity_date: Optional[str] = None
+    calendar: List[StreakCalendarDaySchema]
+    total_days_active: int
+    target_polls_per_day: int
+
+
+class AuraTransactionSchema(Schema):
+    """Aura transaction details"""
+
+    id: int
+    transaction_type: str
+    amount: int
+    description: str
+    poll_id: Optional[int] = None
+    poll_title: Optional[str] = None
+    community_id: Optional[int] = None
+    community_name: Optional[str] = None
+    created_at: str  # ISO datetime string

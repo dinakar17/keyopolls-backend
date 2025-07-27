@@ -2,9 +2,11 @@ from django.contrib.contenttypes.fields import GenericRelation
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
+from django.utils.text import slugify
 
 from keyopolls.common.models import ImpressionTrackingMixin
 from keyopolls.communities.models import CommunityMembership
+from keyopolls.utils import generate_youtube_like_id
 
 
 class Poll(models.Model, ImpressionTrackingMixin):
@@ -15,7 +17,6 @@ class Poll(models.Model, ImpressionTrackingMixin):
         ("multiple", "Multiple Choice"),
         ("ranking", "Ranking Poll"),
         ("text_input", "Text Input Poll"),
-        # Future types can be added easily
     ]
 
     STATUS_CHOICES = [
@@ -29,7 +30,26 @@ class Poll(models.Model, ImpressionTrackingMixin):
 
     # Basic fields
     id = models.BigAutoField(primary_key=True)
-    title = models.CharField(max_length=200)
+
+    # Unique identifier similar to YouTube
+    unique_id = models.CharField(
+        max_length=11,
+        unique=True,
+        blank=True,
+        null=True,
+        help_text="11-character unique identifier for the poll",
+    )
+
+    # URL-friendly slug
+    slug = models.SlugField(
+        max_length=100,
+        unique=True,
+        blank=True,
+        null=True,
+        help_text="URL-friendly identifier for the poll",
+    )
+
+    title = models.CharField()
     description = models.TextField(blank=True)
 
     # Explanation
@@ -60,11 +80,11 @@ class Poll(models.Model, ImpressionTrackingMixin):
 
     # Community-specific settings
     is_pinned = models.BooleanField(default=False)  # Can be pinned in community
-    allow_multiple_votes = models.BooleanField(default=False)  # For multiple choice
-    max_choices = models.PositiveIntegerField(
-        null=True, blank=True
-    )  # Limit for multiple choice
     requires_aura = models.PositiveIntegerField(default=0)  # Minimum aura to vote
+
+    # Multiple choice specific settings
+    allow_multiple_votes = models.BooleanField(default=False)
+    max_choices = models.PositiveIntegerField(null=True, blank=True)
 
     # Correct answers feature
     has_correct_answer = models.BooleanField(default=False)
@@ -118,11 +138,45 @@ class Poll(models.Model, ImpressionTrackingMixin):
             models.Index(fields=["-total_votes"]),
             models.Index(fields=["is_deleted", "status"]),
             models.Index(fields=["status", "community", "-created_at"]),
+            # New indexes for unique_id and slug
+            models.Index(fields=["unique_id"]),
+            models.Index(fields=["slug"]),
         ]
         ordering = ["-created_at"]
 
     def __str__(self):
         return f"{self.title} ({self.get_poll_type_display()})"
+
+    def save(self, *args, **kwargs):
+        """Override save to generate unique_id and slug"""
+        # Generate unique unique_id if not provided
+        if not self.unique_id:
+            max_attempts = 10
+            for _ in range(max_attempts):
+                new_id = generate_youtube_like_id()
+                if not Poll.objects.filter(unique_id=new_id).exists():
+                    self.unique_id = new_id
+                    break
+            else:
+                # If we couldn't generate a unique ID after max_attempts
+                raise ValueError(
+                    f"Could not generate unique unique_id after {max_attempts} attempts"
+                )
+
+        # Generate slug if not provided
+        if not self.slug:
+            base_slug = slugify(self.title)
+            slug = base_slug
+            counter = 1
+
+            # Ensure slug uniqueness
+            while Poll.objects.filter(slug=slug).exclude(pk=self.pk).exists():
+                slug = f"{base_slug}-{counter}"
+                counter += 1
+
+            self.slug = slug
+
+        super().save(*args, **kwargs)
 
     def clean(self):
         """Validate model constraints"""
@@ -141,6 +195,12 @@ class Poll(models.Model, ImpressionTrackingMixin):
                         "correct_ranking_order set"
                     )
                 )
+
+    def get_absolute_url(self):
+        """Get the absolute URL for this poll"""
+        from django.urls import reverse
+
+        return reverse("poll_detail", kwargs={"slug": self.slug})
 
     @property
     def is_active(self):
@@ -359,6 +419,8 @@ class PollVote(models.Model):
         return f"{self.profile.username} voted for {self.option.text}{rank_str}"
 
 
+# Text input polls allow users to submit their own text responses
+# These are stored separately to allow for efficient querying and aggregation
 class PollTextResponse(models.Model):
     """Text responses for text input polls"""
 
@@ -498,6 +560,8 @@ class PollTodo(models.Model):
     text = models.CharField(max_length=200)
     is_completed = models.BooleanField(default=False)
 
+    is_deleted = models.BooleanField(default=False)  # Soft delete support
+
     created_at = models.DateTimeField(default=timezone.now)
     completed_at = models.DateTimeField(null=True, blank=True)
 
@@ -523,3 +587,237 @@ class PollTodo(models.Model):
         self.is_completed = False
         self.completed_at = None
         self.save()
+
+
+# NEW MODELS FOR ANSWER TRACKING AND STREAKS
+
+
+class PollAnswerResult(models.Model):
+    """Track individual poll answer results for users"""
+
+    id = models.BigAutoField(primary_key=True)
+    poll = models.ForeignKey(
+        Poll, on_delete=models.CASCADE, related_name="answer_results"
+    )
+    profile = models.ForeignKey(
+        "profile.PseudonymousProfile",
+        on_delete=models.CASCADE,
+        related_name="poll_answer_results",
+    )
+
+    # Answer correctness
+    is_correct = models.BooleanField()
+
+    # Aura earned for this specific poll (usually +1)
+    aura_earned = models.PositiveIntegerField(default=1)
+
+    # Timestamps
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["profile", "-created_at"]),
+            models.Index(fields=["poll", "is_correct"]),
+            models.Index(fields=["profile", "is_correct", "-created_at"]),
+            models.Index(fields=["profile", "poll"]),
+        ]
+        unique_together = ["poll", "profile"]  # One result per user per poll
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        status = "✅" if self.is_correct else "❌"
+        return (
+            f"{status} {self.profile.username} - {self.poll.title} "
+            f"(+{self.aura_earned} aura)"
+        )
+
+
+class AuraTransaction(models.Model):
+    """Audit trail for aura changes"""
+
+    TRANSACTION_TYPES = [
+        ("poll_participation", "Poll Participation"),
+        ("poll_correct", "Poll Correct Answer"),
+        ("streak_bonus", "Streak Bonus"),
+        ("admin_adjustment", "Admin Adjustment"),
+        ("community_reward", "Community Reward"),
+    ]
+
+    id = models.BigAutoField(primary_key=True)
+    profile = models.ForeignKey(
+        "profile.PseudonymousProfile",
+        on_delete=models.CASCADE,
+        related_name="aura_transactions",
+    )
+
+    # Transaction details
+    transaction_type = models.CharField(max_length=30, choices=TRANSACTION_TYPES)
+    amount = models.IntegerField()  # Can be negative for deductions
+    description = models.CharField(max_length=200, blank=True)
+
+    # Related objects (optional)
+    poll = models.ForeignKey(
+        Poll,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="aura_transactions",
+    )
+    community = models.ForeignKey(
+        "communities.Community",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="aura_transactions",
+    )
+
+    # Timestamp
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["profile", "-created_at"]),
+            models.Index(fields=["transaction_type", "-created_at"]),
+            models.Index(fields=["poll", "-created_at"]),
+            models.Index(fields=["community", "-created_at"]),
+        ]
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        sign = "+" if self.amount >= 0 else ""
+        return (
+            f"{self.profile.username}: {sign}{self.amount} aura "
+            f"({self.get_transaction_type_display()})"
+        )
+
+
+class CommunityStreak(models.Model):
+    """Track user streaks within specific communities"""
+
+    id = models.BigAutoField(primary_key=True)
+    profile = models.ForeignKey(
+        "profile.PseudonymousProfile",
+        on_delete=models.CASCADE,
+        related_name="community_streaks",
+    )
+    community = models.ForeignKey(
+        "communities.Community",
+        on_delete=models.CASCADE,
+        related_name="user_streaks",
+    )
+
+    # Streak data
+    current_streak = models.PositiveIntegerField(default=0)
+    max_streak = models.PositiveIntegerField(default=0)
+
+    # Tracking dates
+    last_activity_date = models.DateField(null=True, blank=True)
+    streak_start_date = models.DateField(null=True, blank=True)
+
+    # Timestamps
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["profile", "community"]),
+            models.Index(fields=["community", "-current_streak"]),
+            models.Index(fields=["community", "-max_streak"]),
+            models.Index(fields=["profile", "-current_streak"]),
+        ]
+        unique_together = ["profile", "community"]
+        ordering = ["-current_streak"]
+
+    def __str__(self):
+        return (
+            f"{self.profile.username} - {self.community.name}: "
+            f"{self.current_streak} days (max: {self.max_streak})"
+        )
+
+    def reset_streak(self):
+        """Reset current streak and update max if needed"""
+        if self.current_streak > self.max_streak:
+            self.max_streak = self.current_streak
+        self.current_streak = 0
+        self.streak_start_date = None
+        self.save(
+            update_fields=[
+                "current_streak",
+                "max_streak",
+                "streak_start_date",
+                "updated_at",
+            ]
+        )
+
+    def increment_streak(self, date):
+        """Increment streak for given date"""
+        if self.current_streak == 0:
+            self.streak_start_date = date
+
+        self.current_streak += 1
+        self.last_activity_date = date
+
+        if self.current_streak > self.max_streak:
+            self.max_streak = self.current_streak
+
+        self.save(
+            update_fields=[
+                "current_streak",
+                "max_streak",
+                "last_activity_date",
+                "streak_start_date",
+                "updated_at",
+            ]
+        )
+
+
+class CommunityStreakActivity(models.Model):
+    """Track daily activity for streak calculation and calendar display"""
+
+    id = models.BigAutoField(primary_key=True)
+    profile = models.ForeignKey(
+        "profile.PseudonymousProfile",
+        on_delete=models.CASCADE,
+        related_name="streak_activities",
+    )
+    community = models.ForeignKey(
+        "communities.Community",
+        on_delete=models.CASCADE,
+        related_name="streak_activities",
+    )
+
+    # Activity date (date only, not datetime)
+    date = models.DateField()
+
+    # Activity tracking
+    polls_answered = models.PositiveIntegerField(default=0)
+    target_met = models.BooleanField(default=False)  # Did they answer 5+ polls?
+
+    # Timestamps
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["profile", "community", "date"]),
+            models.Index(fields=["community", "date", "target_met"]),
+            models.Index(fields=["profile", "date"]),
+            models.Index(fields=["profile", "community", "-date"]),
+        ]
+        unique_together = ["profile", "community", "date"]
+        ordering = ["-date"]
+
+    def __str__(self):
+        status = "🔥" if self.target_met else "📊"
+        return (
+            f"{status} {self.profile.username} - {self.community.name} "
+            f"({self.date}): {self.polls_answered} polls"
+        )
+
+    def check_target_met(self):
+        """Check if daily target is met and update accordingly"""
+        if self.polls_answered >= 5 and not self.target_met:
+            self.target_met = True
+            self.save(update_fields=["target_met", "updated_at"])
+            return True
+        return False

@@ -33,6 +33,7 @@ class TagItemSchema(Schema):
 
 class TagsListFiltersSchema(Schema):
     search: Optional[str] = None
+    community_id: Optional[int] = None
     page: int = 1
     per_page: int = 20
     order_by: str = "-created_at"
@@ -59,19 +60,27 @@ def get_tags_list(request, filters: TagsListFiltersSchema = Query(...)):
 
     Features:
     - Search by tag name or description
+    - Filter by community ID to get tags used in specific community
     - Pagination with configurable page size
     - Multiple sorting options
     - Returns usage count for each tag
 
     Query Parameters:
     - search: Search term for tag name or description
+    - community_id: Filter tags used in a specific community
     - page: Page number (default: 1)
     - per_page: Items per page (default: 20, max: 100)
     - order_by: Sort field (created_at, name, usage_count with - for desc)
     """
 
-    # Import Tag model (adjust the import path based on your project structure)
-    from keyopolls.common.models import Tag  # Adjust this import path as needed
+    # Import models (adjust the import paths based on your project structure)
+    from keyopolls.common.models import (  # Adjust this import path as needed
+        Tag,
+        TaggedItem,
+    )
+    from keyopolls.communities.models import (
+        Community,  # Adjust this import path as needed
+    )
 
     # Validate per_page limit
     if filters.per_page > 100:
@@ -95,8 +104,26 @@ def get_tags_list(request, filters: TagsListFiltersSchema = Query(...)):
     if filters.order_by not in valid_order_fields:
         filters.order_by = "-created_at"
 
+    # Validate community_id if provided
+    if filters.community_id:
+        try:
+            Community.objects.get(id=filters.community_id, is_active=True)
+        except Community.DoesNotExist:
+            return 400, {"message": "Community not found"}
+
     # Start with base queryset
     queryset = Tag.objects.all()
+
+    # Apply community filter
+    if filters.community_id:
+        # Get tags that are used in the specified community
+        community_tag_ids = (
+            TaggedItem.objects.filter(community_id=filters.community_id)
+            .values_list("tag_id", flat=True)
+            .distinct()
+        )
+
+        queryset = queryset.filter(id__in=community_tag_ids)
 
     # Apply search
     if filters.search:
