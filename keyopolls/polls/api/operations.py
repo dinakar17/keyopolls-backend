@@ -56,7 +56,6 @@ def create_poll(
                 folder = PollList.objects.get(
                     id=data.folder_id,
                     community=community,
-                    list_type="folder",
                     is_deleted=False,
                 )
             except PollList.DoesNotExist:
