@@ -34,6 +34,7 @@ class TagItemSchema(Schema):
 class TagsListFiltersSchema(Schema):
     search: Optional[str] = None
     community_id: Optional[int] = None
+    community_slug: Optional[str] = None
     page: int = 1
     per_page: int = 20
     order_by: str = "-created_at"
@@ -108,6 +109,15 @@ def get_tags_list(request, filters: TagsListFiltersSchema = Query(...)):
     if filters.community_id:
         try:
             Community.objects.get(id=filters.community_id, is_active=True)
+        except Community.DoesNotExist:
+            return 400, {"message": "Community not found"}
+
+    if filters.community_slug:
+        try:
+            community = Community.objects.get(
+                slug=filters.community_slug, is_active=True
+            )
+            filters.community_id = community.id
         except Community.DoesNotExist:
             return 400, {"message": "Community not found"}
 

@@ -5,6 +5,7 @@ from django.contrib.contenttypes.models import ContentType
 from ninja import Schema
 
 from keyopolls.common.models import Bookmark, Reaction, TaggedItem
+from keyopolls.common.schemas import PaginationSchema
 from keyopolls.polls.models import Poll, PollTodo, PollVote
 from keyopolls.polls.services import (
     calculate_multiple_choice_distribution,
@@ -39,6 +40,7 @@ class PollCreateSchema(Schema):
     description: Optional[str] = ""
     poll_type: str  # 'single', 'multiple', 'ranking', 'text_input'
     community_id: int
+    folder_id: int
 
     explanation: Optional[str] = None  # Explanation for correct answers (optional)
     todos: Optional[List[TodoItemSchema]] = None  # List of todo items
@@ -226,6 +228,9 @@ class PollDetails(Schema):
     community_name: str
     community_slug: Optional[str] = None  # Slug for URL-friendly names
     community_avatar: Optional[str] = None
+
+    # Poll List id
+    poll_list_id: Optional[int] = None  # ID of the list this poll belongs to
 
     # Settings
     allow_multiple_votes: bool
@@ -440,6 +445,7 @@ class PollDetails(Schema):
             "community_avatar": (
                 poll.community.avatar.url if poll.community.avatar else None
             ),
+            "poll_list_id": poll.poll_list.id if poll.poll_list else None,
             "allow_multiple_votes": poll.allow_multiple_votes,
             "max_choices": poll.max_choices,
             "requires_aura": poll.requires_aura,
@@ -545,3 +551,211 @@ class AuraTransactionSchema(Schema):
     community_id: Optional[int] = None
     community_name: Optional[str] = None
     created_at: str  # ISO datetime string
+
+
+"""
+Poll List Schemas
+"""
+
+
+class PollListCreateSchema(Schema):
+    title: str
+    description: Optional[str] = ""
+    community_slug: str
+    parent_id: Optional[int] = None
+    list_type: Optional[str] = "list"  # "folder" or "list"
+    visibility: Optional[str] = "public"  # "public", "unlisted", "private"
+    is_collaborative: Optional[bool] = False
+    max_polls: Optional[int] = None
+
+
+class PollListUpdateSchema(Schema):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    visibility: Optional[str] = None
+    is_collaborative: Optional[bool] = None
+    max_polls: Optional[int] = None
+    is_featured: Optional[bool] = None
+    parent_id: Optional[int] = None
+    order: Optional[int] = None
+
+
+class ManagePollInListSchema(Schema):
+    poll_id: int
+    action: str  # "add", "remove", or "toggle"
+    order: Optional[int] = None  # Only used for "add" action
+    note: Optional[str] = ""  # Only used for "add" action
+
+
+class PollListProfileSchema(Schema):
+    id: int
+    username: str
+    display_name: str
+    avatar_url: Optional[str] = None  # URL to profile avatar
+
+
+class PollListCommunitySchema(Schema):
+    id: int
+    name: str
+    slug: Optional[str] = None  # Slug for URL-friendly names
+    avatar_url: Optional[str] = None  # URL to community avatar
+
+
+class PollListQueryParams(Schema):
+    # Pagination
+    page: Optional[int] = 1
+    page_size: Optional[int] = 20
+
+    # Filtering
+    list_type: Optional[str] = None  # "folder" or "list"
+    visibility: Optional[str] = None  # "public", "unlisted", "private"
+    community_id: Optional[int] = None
+    community_slug: Optional[str] = None
+    parent_id: Optional[int] = None  # 0 for root level, specific ID for children
+    owner_only: Optional[bool] = False
+    is_collaborative: Optional[bool] = None
+    is_featured: Optional[bool] = None
+    max_depth: Optional[int] = None  # Filter by maximum depth
+
+    # Search
+    search: Optional[str] = None
+
+    # Ordering
+    ordering: Optional[str] = "-created_at"
+    hierarchical_order: Optional[bool] = False  # Order by depth then order field
+
+
+class PollListDetailsSchema(Schema):
+    id: int
+    unique_id: str
+    slug: str
+    title: str
+    description: str
+    list_type: str
+    visibility: str
+    is_collaborative: bool
+    is_featured: bool
+    max_polls: Optional[int]
+
+    # Counts
+    direct_polls_count: int
+    total_polls_count: int
+    direct_folders_count: int
+    total_items_count: int
+
+    # Hierarchy
+    parent_id: Optional[int]
+    depth: int
+    order: int
+    path: str
+
+    # Owner info
+    profile: PollListProfileSchema  # Basic profile info
+    community: PollListCommunitySchema  # Basic community info
+
+    # User permissions
+    can_edit: bool = False
+    can_add_polls: bool = False
+    is_owner: bool = False
+
+    # Engagement
+    view_count: int
+    like_count: int
+    bookmark_count: int
+
+    # Timestamps
+    created_at: datetime
+    updated_at: datetime
+
+    @staticmethod
+    def resolve_details(
+        poll_list, current_profile: Optional[PseudonymousProfile] = None
+    ):
+        is_owner = False
+        can_edit = False
+        can_add_polls = False
+        if current_profile:
+            # Check user permissions
+            is_owner = poll_list.profile == current_profile
+            can_edit = is_owner
+            can_add_polls = poll_list.can_add_polls(current_profile)
+
+        if not is_owner:
+            try:
+                collaborator = poll_list.collaborators.get(profile=current_profile)
+                can_edit = collaborator.can_edit_list()
+            except Exception:
+                pass
+
+        return {
+            "id": poll_list.id,
+            "unique_id": poll_list.unique_id,
+            "slug": poll_list.slug,
+            "title": poll_list.title,
+            "description": poll_list.description,
+            "list_type": poll_list.list_type,
+            "visibility": poll_list.visibility,
+            "is_collaborative": poll_list.is_collaborative,
+            "is_featured": poll_list.is_featured,
+            "max_polls": poll_list.max_polls,
+            "direct_polls_count": poll_list.direct_polls_count,
+            "total_polls_count": poll_list.total_polls_count,
+            "direct_folders_count": poll_list.direct_folders_count,
+            "total_items_count": poll_list.total_items_count,
+            "parent_id": poll_list.parent_id,
+            "depth": poll_list.depth,
+            "order": poll_list.order,
+            "path": poll_list.path,
+            "profile": {
+                "id": poll_list.profile.id,
+                "username": poll_list.profile.username,
+                "display_name": poll_list.profile.display_name,
+            },
+            "community": {
+                "id": poll_list.community.id,
+                "name": poll_list.community.name,
+                "slug": poll_list.community.slug,
+            },
+            "can_edit": can_edit,
+            "can_add_polls": can_add_polls,
+            "is_owner": is_owner,
+            "view_count": poll_list.view_count,
+            "like_count": poll_list.like_count,
+            "bookmark_count": poll_list.bookmark_count,
+            "created_at": poll_list.created_at,
+            "updated_at": poll_list.updated_at,
+        }
+
+
+class ParentSchema(Schema):
+    id: int
+    title: str
+    depth: int
+
+
+class BreadCrumbSchema(Schema):
+    id: int
+    title: str
+    depth: int
+
+
+class HierarchySchema(Schema):
+    parent: Optional[ParentSchema] = None
+    breadcrumbs: Optional[list[BreadCrumbSchema]] = None
+
+
+class PollListsListResponseSchema(Schema):
+    lists: list[PollListDetailsSchema]
+    pagination: PaginationSchema
+    hierarchy: Optional[HierarchySchema] = None  # Present when viewing specific parent
+
+
+class ManagePollInListResponseSchema(Schema):
+    success: bool
+    action: str  # "added" or "removed"
+    message: str
+    list_item_id: Optional[int]  # None when removed
+    poll_id: int
+    list_id: int
+    order: Optional[int]  # None when removed
+    in_list: bool  # Current state after action

@@ -270,6 +270,10 @@ def list_polls(
     request: HttpRequest,
     # Community & Category filtering
     community_id: Optional[int] = Query(None, description="Filter by community ID"),
+    community_slug: Optional[str] = Query(None, description="Filter by community slug"),
+    folder_id: Optional[int] = Query(
+        None, description="Filter by folder ID (for lists)"
+    ),
     category_id: Optional[int] = Query(
         None, description="Filter by category ID (1 = for-you feed)"
     ),
@@ -486,6 +490,27 @@ def list_polls(
                     applied_filters["community_id"] = community_id
                 except Community.DoesNotExist:
                     return 400, {"message": "Community not found"}
+
+            if community_slug:
+                try:
+                    community = Community.objects.get(
+                        slug=community_slug, is_active=True
+                    )
+                    polls = polls.filter(community=community)
+                    applied_filters["community_slug"] = community_slug
+                except Community.DoesNotExist:
+                    return 400, {"message": "Community not found"}
+
+            if folder_id:
+                # Filter by folder ID (for lists)
+                from keyopolls.polls.models.lists import PollList
+
+                try:
+                    poll_list = PollList.objects.get(id=folder_id)
+                    polls = polls.filter(poll_list=poll_list)
+                    applied_filters["folder_id"] = folder_id
+                except PollList.DoesNotExist:
+                    return 400, {"message": "Poll list not found"}
 
             # === USER-SPECIFIC FILTERS ===
             if my_polls and profile:

@@ -12,7 +12,7 @@ from ninja.errors import ValidationError
 from keyopolls.common.models import Tag, TaggedItem
 from keyopolls.common.schemas import Message
 from keyopolls.communities.models import Community, CommunityMembership
-from keyopolls.polls.models import Poll, PollOption, PollTodo
+from keyopolls.polls.models import Poll, PollList, PollOption, PollTodo
 from keyopolls.polls.schemas import (
     PollCreateError,
     PollCreateSchema,
@@ -48,6 +48,25 @@ def create_poll(
             community = Community.objects.get(id=data.community_id, is_active=True)
         except Community.DoesNotExist:
             return 400, {"message": "Community not found"}
+
+        # Validate folder if provided
+        folder = None
+        if data.folder_id:
+            try:
+                folder = PollList.objects.get(
+                    id=data.folder_id,
+                    community=community,
+                    list_type="folder",
+                    is_deleted=False,
+                )
+            except PollList.DoesNotExist:
+                return 400, {"message": "Folder not found or invalid"}
+
+            # Check if user can add polls to this folder
+            if not folder.can_add_polls(profile):
+                return 403, {
+                    "message": "You don't have permission to add polls to this folder"
+                }
 
         # Handle membership logic based on community type
         membership = None
@@ -219,9 +238,9 @@ def create_poll(
             profile=profile, community=community, created_at__date=today
         ).count()
 
-        if daily_poll_count >= 20:
+        if daily_poll_count >= 100:
             return 400, {
-                "message": "You can only create 20 polls per day in this community"
+                "message": "You can only create 100 polls per day in this community"
             }
 
         # Check if user is creator or moderator
@@ -302,6 +321,15 @@ def create_poll(
                     if option_images and i < len(option_images):
                         option.image = option_images[i]
                         option.save()
+
+            # Add poll to folder if specified
+            if folder:
+                # Assign poll to the folder directly
+                poll.poll_list = folder
+                poll.save(update_fields=["poll_list"])
+
+                # Update folder counts
+                folder.update_counts()
 
             # Create todos
             if hasattr(data, "todos") and data.todos:

@@ -6,7 +6,22 @@ from django.utils.text import slugify
 
 from keyopolls.common.models import ImpressionTrackingMixin
 from keyopolls.communities.models import CommunityMembership
+from keyopolls.polls.models.lists import PollList
 from keyopolls.utils import generate_youtube_like_id
+
+__all__ = [
+    "Poll",
+    "PollOption",
+    "PollVote",
+    "PollTextResponse",
+    "PollTextAggregate",
+    "PollTodo",
+    "PollAnswerResult",
+    "AuraTransaction",
+    "CommunityStreak",
+    "CommunityStreakActivity",
+    "PollList",
+]
 
 
 class Poll(models.Model, ImpressionTrackingMixin):
@@ -76,6 +91,15 @@ class Poll(models.Model, ImpressionTrackingMixin):
     # Community (polls are always part of a community)
     community = models.ForeignKey(
         "communities.Community", on_delete=models.CASCADE, related_name="polls"
+    )
+
+    poll_list = models.ForeignKey(
+        PollList,
+        on_delete=models.CASCADE,
+        related_name="poll_list",
+        help_text="List this poll belongs to",
+        null=True,
+        blank=True,
     )
 
     # Community-specific settings
