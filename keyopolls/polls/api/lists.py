@@ -1,6 +1,6 @@
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.paginator import Paginator
-from django.db.models import Prefetch, Q
+from django.db.models import Max, Prefetch, Q
 from django.http import HttpRequest
 from ninja import File, Query, Router, UploadedFile
 
@@ -93,6 +93,15 @@ def create_poll_list(
         }
 
     try:
+        # Calculate the next order value for this parent
+        # Find the maximum order value for items with the same parent
+        max_order_result = PollList.objects.filter(
+            parent=parent, community=community, is_deleted=False
+        ).aggregate(max_order=Max("order"))
+
+        max_order = max_order_result["max_order"] or 0
+        next_order = max_order + 1
+
         # Create the poll list
         poll_list = PollList.objects.create(
             title=title,
@@ -107,6 +116,7 @@ def create_poll_list(
             profile=profile,
             community=community,
             parent=parent,
+            order=next_order,  # Set the calculated order
             is_collaborative=(
                 data.is_collaborative if hasattr(data, "is_collaborative") else False
             ),
