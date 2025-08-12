@@ -94,6 +94,8 @@ INSTALLED_APPS = [
     "keyopolls.polls",
     "keyopolls.communities",
     "keyopolls.articles",
+    "keyopolls.transactions",
+    "keyopolls.chats",
     # AWS S3
     "storages",
     # Celery

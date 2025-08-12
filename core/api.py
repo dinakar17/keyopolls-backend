@@ -8,6 +8,9 @@ from ninja.errors import AuthenticationError, HttpError, HttpRequest, Validation
 from ninja.throttling import AnonRateThrottle, AuthRateThrottle
 
 from keyopolls.articles.api import router as articles_router
+from keyopolls.chats.api import router as chats_router
+from keyopolls.chats.api.messages import router as messages_router
+from keyopolls.chats.api.services import router as services_router
 from keyopolls.comments.api import router as comments_router
 from keyopolls.comments.api.search import router as comments_search_router
 from keyopolls.common.router import router as common_router
@@ -16,6 +19,7 @@ from keyopolls.notifications.api import router as notifications_router
 from keyopolls.polls.api import router as polls_router
 from keyopolls.profile.api import router as profile_router
 from keyopolls.profile.middleware import AuthError
+from keyopolls.transactions.api import router as transactions_router
 
 api = NinjaAPI(
     docs_url="docs/",
@@ -111,5 +115,9 @@ api.add_router("/comments/search", comments_search_router)
 api.add_router("/articles", articles_router)
 api.add_router("/communities", communities_router)
 api.add_router("/common", common_router)
+api.add_router("/chats", chats_router)
+api.add_router("/messages", messages_router)
+api.add_router("/services", services_router)
+api.add_router("/transactions", transactions_router)
 api.add_router("/polls", polls_router)
 api.add_router("/notifications", notifications_router)

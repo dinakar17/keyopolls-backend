@@ -52,6 +52,19 @@ class PseudonymousProfile(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     last_login = models.DateTimeField(blank=True, null=True)
 
+    # total credits left
+    total_credits = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    # total earned if user is a mentor
+    total_earned = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    # Online Status
+    is_online = models.BooleanField(
+        default=False, help_text="Is the user currently online"
+    )
+    last_seen = models.DateTimeField(
+        blank=True, null=True, help_text="Last time the user was seen online"
+    )
+
     def __str__(self):
         return f"{self.username} ({self.display_name})"
 
