@@ -32,6 +32,39 @@ class PseudonymousProfile(models.Model):
         null=True,
         help_text="Short bio or description for the profile. Optional.",
     )
+    headline = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="Short headline or tagline for the profile. Optional.",
+    )
+
+    # Social links
+    twitter = models.URLField(
+        blank=True,
+        null=True,
+        help_text="Twitter profile link. Optional.",
+    )
+    linkedin = models.URLField(
+        blank=True,
+        null=True,
+        help_text="LinkedIn profile link. Optional.",
+    )
+    substack = models.URLField(
+        blank=True,
+        null=True,
+        help_text="Substack profile link. Optional.",
+    )
+    instagram = models.URLField(
+        blank=True,
+        null=True,
+        help_text="Instagram profile link. Optional.",
+    )
+    youtube = models.URLField(
+        blank=True,
+        null=True,
+        help_text="YouTube channel link. Optional.",
+    )
 
     # Aura scores
     total_aura = models.IntegerField(default=0)

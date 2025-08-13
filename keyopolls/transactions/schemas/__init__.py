@@ -41,7 +41,7 @@ class TransactionFiltersSchema(Schema):
     order_by: str = "-created_at"
 
 
-class TimelineItemSchema(Schema):
+class TransactionTimelineItemSchema(Schema):
     id: str
     item_type: str
     content: Optional[str] = None
@@ -63,7 +63,7 @@ class TransactionSchema(Schema):
     is_debit: bool
     created_at: datetime
     completed_at: Optional[datetime] = None
-    timeline_item: Optional[TimelineItemSchema] = None
+    timeline_item: Optional[TransactionTimelineItemSchema] = None
 
 
 class TransactionSummarySchema(Schema):

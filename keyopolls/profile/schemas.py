@@ -36,6 +36,12 @@ class LoginSchema(Schema):
 class ProfileUpdateSchema(Schema):
     display_name: Optional[str] = None
     about: Optional[str] = None
+    headline: Optional[str] = None
+    twitter: Optional[str] = None
+    linkedin: Optional[str] = None
+    substack: Optional[str] = None
+    instagram: Optional[str] = None
+    youtube: Optional[str] = None
 
 
 class ProfileDetailsSchema(Schema):
@@ -45,6 +51,12 @@ class ProfileDetailsSchema(Schema):
     about: Optional[str] = None
     avatar: Optional[str] = None
     banner: Optional[str] = None
+    headline: Optional[str] = None
+    twitter: Optional[str] = None
+    linkedin: Optional[str] = None
+    substack: Optional[str] = None
+    instagram: Optional[str] = None
+    youtube: Optional[str] = None
     email: str
     aura_polls: int
     aura_comments: int
@@ -61,6 +73,12 @@ class ProfileDetailsSchema(Schema):
             "username": profile.username,
             "display_name": profile.display_name,
             "about": profile.about,
+            "headline": profile.headline,
+            "twitter": profile.twitter,
+            "linkedin": profile.linkedin,
+            "substack": profile.substack,
+            "instagram": profile.instagram,
+            "youtube": profile.youtube,
             "email": profile.email,
             "aura_polls": profile.aura_polls,
             "aura_comments": profile.aura_comments,
