@@ -19,10 +19,11 @@ class ServiceItem(models.Model):
         ("live_chat", "Live Chat"),
         ("audio_call", "Audio Call"),
         ("video_call", "Video Call"),
+        ("custom", "Custom Service"),
+        # Group services
         ("group_chat", "Group Chat"),
         ("group_audio_call", "Group Audio Call"),
         ("group_video_call", "Group Video Call"),
-        ("custom", "Custom Service"),
     ]
 
     STATUS_CHOICES = [
@@ -46,7 +47,6 @@ class ServiceItem(models.Model):
         related_name="services",
         help_text="The community this service belongs to",
     )
-
     preview_image = models.ImageField(
         upload_to="service_previews/",
         null=True,
@@ -64,17 +64,29 @@ class ServiceItem(models.Model):
     )
 
     # Attachments Required for some services by users
+    # (if true this service requires user input)
     attachments_required = models.BooleanField(
         default=False,
         help_text="Whether users need to attach files (e.g., images, documents) "
-        "when purchasing this service",
+        "when using this service. Ex: Resume review, photo review, etc.",
+    )
+
+    # DM Related Settings
+    max_messages_a_day = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Maximum number of messages a moderator wants to accept per day",
+    )
+    reply_time = models.PositiveIntegerField(
+        default=1,
+        help_text="Expected reply time in days for this service",
     )
 
     # Pricing and duration
     price = models.DecimalField(
         max_digits=10,
         decimal_places=2,
-        validators=[MinValueValidator(Decimal("0.01"))],
+        validators=[MinValueValidator(Decimal("0.00"))],
         help_text="Price in credits for this service",
     )
     duration_minutes = models.PositiveIntegerField(
@@ -110,7 +122,15 @@ class ServiceItem(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
-        unique_together = ["creator", "community", "service_type"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["creator", "community", "service_type"],
+                condition=models.Q(
+                    service_type__in=["dm", "live_chat", "audio_call", "video_call"]
+                ),
+                name="unique_personal_service_per_creator_community",
+            )
+        ]
 
     def __str__(self):
         return f"{self.name} by {self.creator.username} in {self.community.name}"

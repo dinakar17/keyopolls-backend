@@ -14,7 +14,7 @@ class ChangeRoleRequestSchema(Schema):
     new_role: str
 
     class Config:
-        json_schema_extra = {"example": {"user_id": 123, "new_role": "moderator"}}
+        schema_extra = {"example": {"user_id": 123, "new_role": "moderator"}}
 
 
 @router.patch(

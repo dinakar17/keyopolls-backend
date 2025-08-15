@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import List
 
 from django.core.paginator import Paginator
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from ninja import File, Query, Router, UploadedFile
 
@@ -165,6 +165,11 @@ def get_services(request, filters: ServiceFiltersSchema = Query(...)):
             "created_at": service.created_at,
             "updated_at": service.updated_at,
             "attachments": attachments_data,
+            # User Input Setting
+            "attachments_required": service.attachments_required,
+            # DM-specific fields
+            "max_messages_a_day": service.max_messages_a_day,
+            "reply_time": service.reply_time,
         }
         services_data.append(service_data)
 
@@ -205,6 +210,13 @@ def create_service(
     - is_duration_based: Whether service has time limit (default: False)
     - status: Service status (default: active)
     - attachments: List of files to attach to the service
+    - max_messages_a_day: For DM services, max messages per day
+    - reply_time: For DM services, reply time in days
+
+    Service creation limits:
+    - dm, live_chat, audio_call, video_call: Only one of each type per community per
+      creator
+    - custom: Multiple custom services allowed per community per creator
     """
 
     profile = request.auth
@@ -237,21 +249,53 @@ def create_service(
             "message": (f"Invalid status. Valid statuses: {', '.join(valid_statuses)}")
         }
 
-    # Validate price
-    if data.price < 0.01:
-        return 400, {"message": "Price must be at least 0.01 credits"}
+    # Check for duplicate service type restrictions
+    # Only allow one service of types: dm, live_chat, audio_call, video_call
+    # per community per creator
+    # Allow multiple custom services
+    restricted_service_types = [
+        "dm",
+        "live_chat",
+        "audio_call",
+        "video_call",
+        "group_chat",
+        "group_audio_call",
+        "group_video_call",
+    ]
 
-    # Check for duplicate service type in same community by same creator
-    existing_service = ServiceItem.objects.filter(
-        creator=profile, community=community, service_type=data.service_type
-    ).first()
+    if data.service_type in restricted_service_types:
+        existing_service = ServiceItem.objects.filter(
+            creator=profile, community=community, service_type=data.service_type
+        ).first()
 
-    if existing_service:
-        return 400, {
-            "message": (
-                f"You already have a {data.service_type} service in this community"
+        if existing_service:
+            service_type_labels = {
+                "dm": "Direct Message",
+                "live_chat": "Live Chat",
+                "audio_call": "Audio Call",
+                "video_call": "Video Call",
+            }
+            service_label = service_type_labels.get(
+                data.service_type, data.service_type
             )
-        }
+            return 400, {
+                "message": (
+                    (
+                        f"You already have a {service_label} service in this community."
+                        f"Only one service of this type is allowed per community."
+                    )
+                )
+            }
+
+    # Validate DM-specific fields
+    if data.service_type == "dm":
+        if hasattr(data, "max_messages_a_day") and data.max_messages_a_day is not None:
+            if data.max_messages_a_day < 1:
+                return 400, {"message": "Max messages per day must be at least 1"}
+
+        if hasattr(data, "reply_time") and data.reply_time is not None:
+            if data.reply_time < 1:
+                return 400, {"message": "Reply time must be at least 1 day"}
 
     # Validate attachments if provided
     if attachments:
@@ -296,89 +340,161 @@ def create_service(
                     f"Supported types: images, videos, audio, documents"
                 }
 
-    # Create the service
-    service = ServiceItem.objects.create(
-        creator=profile,
-        community=community,
-        preview_image=preview_image if preview_image else None,
-        service_type=data.service_type,
-        name=data.name,
-        description=data.description,
-        price=Decimal(str(data.price)),
-        duration_minutes=data.duration_minutes,
-        is_duration_based=data.is_duration_based,
-        status=data.status,
-    )
+    # Use atomic transaction for all database operations
+    try:
+        with transaction.atomic():
+            # Double-check for race conditions on restricted service types
+            if data.service_type in restricted_service_types:
+                existing_service = (
+                    ServiceItem.objects.select_for_update()
+                    .filter(
+                        creator=profile,
+                        community=community,
+                        service_type=data.service_type,
+                    )
+                    .first()
+                )
 
-    # Create attachments if provided
-    attachments_data = []
-    if attachments:
-        for index, attachment in enumerate(attachments):
-            # Determine attachment type based on MIME type
-            mime_type, _ = mimetypes.guess_type(attachment.name)
+                if existing_service:
+                    service_type_labels = {
+                        "dm": "Direct Message",
+                        "live_chat": "Live Chat",
+                        "audio_call": "Audio Call",
+                        "video_call": "Video Call",
+                    }
+                    service_label = service_type_labels.get(
+                        data.service_type, data.service_type
+                    )
+                    return 400, {
+                        "message": (
+                            f"You already have a {service_label} service in this "
+                            f"community.Only one service of this type is allowed"
+                            f"per community."
+                        )
+                    }
 
-            if mime_type:
-                if mime_type.startswith("image/"):
-                    attachment_type = "image"
-                elif mime_type.startswith("video/"):
-                    attachment_type = "video"
-                elif mime_type.startswith("audio/"):
-                    attachment_type = "audio"
-                else:
-                    attachment_type = "document"
-            else:
-                attachment_type = "document"  # Default fallback
+            # Prepare service creation data
+            service_data = {
+                "creator": profile,
+                "community": community,
+                "preview_image": preview_image if preview_image else None,
+                "service_type": data.service_type,
+                "name": data.name,
+                "description": data.description,
+                "price": Decimal(str(data.price)),
+                "attachments_required": data.attachments_required,
+                "duration_minutes": data.duration_minutes,
+                "is_duration_based": data.is_duration_based,
+                "is_broadcasted": data.is_broadcasted,
+                "status": data.status,
+            }
 
-            # Create service attachment
-            service_attachment = ServiceAttachment.objects.create(
-                service=service,
-                attachment_type=attachment_type,
-                file=attachment,
-                title=f"Attachment {index + 1}",  # Default title
-                display_order=index,
-            )
+            # Add DM-specific fields if service type is dm
+            if data.service_type == "dm":
+                if (
+                    hasattr(data, "max_messages_a_day")
+                    and data.max_messages_a_day is not None
+                ):
+                    service_data["max_messages_a_day"] = data.max_messages_a_day
 
-            attachments_data.append(
-                {
-                    "id": str(service_attachment.id),
-                    "attachment_type": service_attachment.attachment_type,
-                    "file_name": service_attachment.file_name,
-                    "file_size": service_attachment.file_size,
-                    "title": service_attachment.title,
-                    "description": service_attachment.description,
-                    "display_order": service_attachment.display_order,
-                    "file_url": (
-                        service_attachment.file.url if service_attachment.file else None
-                    ),
-                }
-            )
+                if hasattr(data, "reply_time") and data.reply_time is not None:
+                    service_data["reply_time"] = data.reply_time
 
-    # Build response
-    service_data = {
-        "id": str(service.id),
-        "creator_id": service.creator.id,
-        "creator_username": service.creator.username,
-        "creator_display_name": service.creator.display_name,
-        "community_id": service.community.id,
-        "community_name": service.community.name,
-        "service_type": service.service_type,
-        "name": service.name,
-        "description": service.description,
-        "price": float(service.price),
-        "duration_minutes": service.duration_minutes,
-        "is_duration_based": service.is_duration_based,
-        "status": service.status,
-        "is_available": service.is_available,
-        "total_purchases": service.total_purchases,
-        "total_revenue": float(service.total_revenue),
-        "is_broadcasted": service.is_broadcasted,
-        "preview_image": service.preview_image.url if service.preview_image else None,
-        "created_at": service.created_at,
-        "updated_at": service.updated_at,
-        "attachments": attachments_data,
-    }
+            # Create the service
+            service = ServiceItem.objects.create(**service_data)
 
-    return 201, {"service": service_data}
+            # if broadcasted, create a timeline item
+            if service.is_broadcasted:
+                TimelineItem.objects.create(
+                    chat=None,  # No chat for broadcasted services
+                    sender=profile,
+                    service_item=service,
+                    community=community,
+                    item_type="service",
+                )
+
+            # Create attachments if provided
+            attachments_data = []
+            if attachments:
+                for index, attachment in enumerate(attachments):
+                    # Determine attachment type based on MIME type
+                    mime_type, _ = mimetypes.guess_type(attachment.name)
+
+                    if mime_type:
+                        if mime_type.startswith("image/"):
+                            attachment_type = "image"
+                        elif mime_type.startswith("video/"):
+                            attachment_type = "video"
+                        elif mime_type.startswith("audio/"):
+                            attachment_type = "audio"
+                        else:
+                            attachment_type = "document"
+                    else:
+                        attachment_type = "document"  # Default fallback
+
+                    # Create service attachment
+                    service_attachment = ServiceAttachment.objects.create(
+                        service=service,
+                        attachment_type=attachment_type,
+                        file=attachment,
+                        title=f"Attachment {index + 1}",  # Default title
+                        display_order=index,
+                    )
+
+                    attachments_data.append(
+                        {
+                            "id": str(service_attachment.id),
+                            "attachment_type": service_attachment.attachment_type,
+                            "file_name": service_attachment.file_name,
+                            "file_size": service_attachment.file_size,
+                            "title": service_attachment.title,
+                            "description": service_attachment.description,
+                            "display_order": service_attachment.display_order,
+                            "file_url": (
+                                service_attachment.file.url
+                                if service_attachment.file
+                                else None
+                            ),
+                        }
+                    )
+
+            # Build response data
+            response_data = {
+                "id": str(service.id),
+                "creator_id": service.creator.id,
+                "creator_username": service.creator.username,
+                "creator_display_name": service.creator.display_name,
+                "community_id": service.community.id,
+                "community_name": service.community.name,
+                "service_type": service.service_type,
+                "name": service.name,
+                "description": service.description,
+                "price": float(service.price),
+                "duration_minutes": service.duration_minutes,
+                "is_duration_based": service.is_duration_based,
+                "status": service.status,
+                "is_available": service.is_available,
+                "total_purchases": service.total_purchases,
+                "total_revenue": float(service.total_revenue),
+                "is_broadcasted": service.is_broadcasted,
+                "preview_image": (
+                    service.preview_image.url if service.preview_image else None
+                ),
+                "created_at": service.created_at,
+                "updated_at": service.updated_at,
+                "attachments": attachments_data,
+                "max_messages_a_day": service.max_messages_a_day,
+                "reply_time": service.reply_time,
+            }
+
+            return 201, {"service": response_data}
+
+    except IntegrityError as e:
+        return 400, {"message": f"Database constraint violation: {str(e)}"}
+    except Exception:
+        # Log the error for debugging
+        # logger.error(f"Error creating service: {str(e)}")
+        return 400, {"message": "An error occurred while creating the service"}
 
 
 @router.post(
@@ -435,13 +551,41 @@ def update_service(
         service.description = data.description
         update_fields.append("description")
 
+    if data.attachments_required is not None:
+        print(data.attachments_required)
+        service.attachments_required = data.attachments_required
+        update_fields.append("attachments_required")
+
+    if data.is_broadcasted is not None:
+        service.is_broadcasted = data.is_broadcasted
+        update_fields.append("is_broadcasted")
+        # If broadcasted, create or update a timeline item
+        if service.is_broadcasted:
+            TimelineItem.objects.update_or_create(
+                chat=None,  # No chat for broadcasted services
+                sender=profile,
+                service_item=service,
+                community=service.community,
+                defaults={"item_type": "service"},
+            )
+
+    if data.max_messages_a_day is not None:
+        if data.max_messages_a_day < 1:
+            return 400, {"message": "Max messages per day must be at least 1"}
+        service.max_messages_a_day = data.max_messages_a_day
+        update_fields.append("max_messages_a_day")
+
+    if data.reply_time is not None:
+        if data.reply_time < 1:
+            return 400, {"message": "Reply time must be at least 1 day"}
+        service.reply_time = data.reply_time
+        update_fields.append("reply_time")
+
     if preview_image:
         service.preview_image = preview_image
         update_fields.append("preview_image")
 
     if data.price is not None:
-        if data.price < 0.01:
-            return 400, {"message": "Price must be at least 0.01 credits"}
         service.price = Decimal(str(data.price))
         update_fields.append("price")
 

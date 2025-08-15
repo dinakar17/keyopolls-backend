@@ -94,6 +94,12 @@ class CreateServiceSchema(Schema):
     duration_minutes: int = 10
     is_duration_based: bool = False
     status: str = "active"
+    is_broadcasted: bool = False
+    # User input required
+    attachments_required: bool = False
+    # DM Related Settings
+    max_messages_a_day: Optional[int] = None
+    reply_time: Optional[int] = None  # Expected reply time in days
 
 
 class UpdateServiceSchema(Schema):
@@ -104,6 +110,12 @@ class UpdateServiceSchema(Schema):
     is_duration_based: Optional[bool] = None
     status: Optional[str] = None
     is_available: Optional[bool] = None
+    is_broadcasted: Optional[bool] = None
+    # User Input Setting
+    attachments_required: Optional[bool] = None
+    # DM Related Settings
+    max_messages_a_day: Optional[int] = None
+    reply_time: Optional[int] = None  # Expected reply time in days
 
 
 # Response Schemas
@@ -152,6 +164,11 @@ class ServiceItemSchema(Schema):
     created_at: datetime
     updated_at: datetime
     attachments: List[ServiceAttachmentSchema] = []
+    # user input setting
+    attachments_required: bool = False
+    # DM Related Settings
+    max_messages_a_day: Optional[int] = None
+    reply_time: Optional[int] = None  # Expected reply time in days
 
 
 class ServicesListResponseSchema(Schema):
@@ -180,7 +197,7 @@ class TimelineFiltersSchema(Schema):
     per_page: int = 20
 
     class Config:
-        json_schema_extra = {
+        schema_extra = {
             "example": {
                 "chat_id": "uuid-string",
                 "community_id": 123,
@@ -203,7 +220,7 @@ class CreateTimelineItemSchema(Schema):
     call_status: Optional[str] = None
 
     class Config:
-        json_schema_extra = {
+        schema_extra = {
             "example": {
                 "chat_id": "uuid-string",
                 "item_type": "text",

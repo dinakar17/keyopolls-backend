@@ -4,6 +4,7 @@ from django.db import models
 from django.utils import timezone
 
 from keyopolls.chats.models.services import ServiceItem
+from keyopolls.common.models import ImpressionTrackingMixin
 from keyopolls.communities.models import Community
 from keyopolls.profile.models import PseudonymousProfile
 
@@ -56,7 +57,7 @@ class Chat(models.Model):
         return self.timeline_items.all().order_by("created_at")
 
 
-class TimelineItem(models.Model):
+class TimelineItem(models.Model, ImpressionTrackingMixin):
     """
     Base model for all items that appear in chat timeline
     (messages, calls, etc.)
@@ -119,6 +120,10 @@ class TimelineItem(models.Model):
     is_read = models.BooleanField(default=False)
     delivered_at = models.DateTimeField(blank=True, null=True)
     read_at = models.DateTimeField(blank=True, null=True)
+
+    # de-normalized counters
+    impressions_count = models.PositiveIntegerField(default=0)
+    like_count = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ["created_at"]
