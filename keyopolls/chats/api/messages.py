@@ -1,4 +1,5 @@
 import mimetypes
+from typing import List
 
 from django.core.paginator import Paginator
 from django.db.models import Q
@@ -6,13 +7,14 @@ from django.utils import timezone
 from ninja import File, Query, Router
 from ninja.files import UploadedFile
 
-from keyopolls.chats.models import Chat, TimelineItem
+from keyopolls.chats.models import Chat, TimelineItem, TimelineItemAttachment
 from keyopolls.chats.models.services import ServiceItem
 from keyopolls.chats.schemas import (
     CreateTimelineItemSchema,
     MentorDetails,
     TimelineFiltersSchema,
     TimelineItemResponseSchema,
+    TimelineItemSchema,
     TimelineResponseSchema,
     UpdateTimelineItemSchema,
 )
@@ -75,6 +77,8 @@ def get_timeline_items(request, filters: TimelineFiltersSchema = Query(...)):
     - Filter by item type, sender, etc.
     - Includes mentor details for each message
     - Mixed timeline of chat + broadcast messages ordered by time
+    - Multiple attachments support per message
+    - Consistent service data using ServiceItemSchema
 
     Query Parameters:
     - chat_id: Get messages for specific chat
@@ -94,10 +98,15 @@ def get_timeline_items(request, filters: TimelineFiltersSchema = Query(...)):
     if filters.per_page < 1:
         filters.per_page = 20
 
-    # Start with base queryset
+    # Start with base queryset with proper prefetching
     queryset = TimelineItem.objects.select_related(
-        "sender", "chat", "community", "service_item"
-    )
+        "sender",
+        "chat",
+        "community",
+        "service_item",
+        "service_item__creator",
+        "service_item__community",
+    ).prefetch_related("attachments", "service_item__attachments")
 
     # Apply main filters
     conditions = Q()
@@ -170,52 +179,8 @@ def get_timeline_items(request, filters: TimelineFiltersSchema = Query(...)):
     except Exception:
         return 400, {"message": "Invalid page number"}
 
-    # Build response
-    timeline_data = []
-    for item in page_obj.object_list:
-        # Build sender details
-        sender_data = {
-            "id": item.sender.id,
-            "username": item.sender.username,
-            "display_name": item.sender.display_name,
-            "avatar": item.sender.avatar.url if item.sender.avatar else None,
-            "is_online": item.sender.is_online,
-            "last_seen": item.sender.last_seen,
-        }
-
-        # Build service item details if present
-        service_data = None
-        if item.service_item:
-            service_data = {
-                "id": str(item.service_item.id),
-                "name": item.service_item.name,
-                "service_type": item.service_item.service_type,
-                "price": float(item.service_item.price),
-                "duration_minutes": item.service_item.duration_minutes,
-                "is_duration_based": item.service_item.is_duration_based,
-            }
-
-        timeline_item_data = {
-            "id": str(item.id),
-            "chat_id": str(item.chat.id) if item.chat else None,
-            "community_id": item.community.id if item.community else None,
-            "sender": sender_data,
-            "service_item": service_data,
-            "item_type": item.item_type,
-            "content": item.content,
-            "file_url": item.file.url if item.file else None,
-            "file_name": item.file_name,
-            "file_size": item.file_size,
-            "call_duration": item.call_duration,
-            "call_status": item.call_status,
-            "is_delivered": item.is_delivered,
-            "is_read": item.is_read,
-            "delivered_at": item.delivered_at,
-            "read_at": item.read_at,
-            "created_at": item.created_at,
-            "is_broadcast": item.chat is None,  # Broadcast if no chat
-        }
-        timeline_data.append(timeline_item_data)
+    # Use the resolve method instead of manual data building
+    timeline_data = TimelineItemSchema.resolve_list(page_obj.object_list, profile)
 
     return {
         "timeline_items": timeline_data,
@@ -239,7 +204,9 @@ def get_timeline_items(request, filters: TimelineFiltersSchema = Query(...)):
     auth=OptionalPseudonymousJWTAuth,
 )
 def create_timeline_item(
-    request, data: CreateTimelineItemSchema, file: UploadedFile = File(None)
+    request,
+    data: CreateTimelineItemSchema,
+    attachments: List[UploadedFile] = File(None),
 ):
     """
     Create a new timeline item (message).
@@ -254,9 +221,10 @@ def create_timeline_item(
     Optional fields:
     - chat_id: For chat messages
     - community_id: For broadcast messages
+    - community_slug: For community messages
     - content: Text content
     - service_item_id: For service-related messages
-    - file: File attachment
+    - attachments: File attachments (multiple files supported)
     - call_duration: For call messages
     - call_status: For call messages
     """
@@ -288,6 +256,20 @@ def create_timeline_item(
         except Chat.DoesNotExist:
             return 404, {"message": "Chat not found"}
 
+    elif data.community_slug:
+        # Community message
+        try:
+            community = Community.objects.get(slug=data.community_slug, is_active=True)
+
+            # Ensure user is a member of this community
+            if not CommunityMembership.objects.filter(
+                community=community, profile=profile, status="active"
+            ).exists():
+                return 403, {"message": "You are not a member of this community"}
+
+        except Community.DoesNotExist:
+            return 404, {"message": "Community not found"}
+
     elif data.community_id:
         # Broadcast message - only moderators can create
         try:
@@ -306,7 +288,9 @@ def create_timeline_item(
         except Community.DoesNotExist:
             return 404, {"message": "Community not found"}
     else:
-        return 400, {"message": "Either chat_id or community_id is required"}
+        return 400, {
+            "message": "Either chat_id, community_id, or community_slug is required"
+        }
 
     # Validate service item if provided
     service_item = None
@@ -316,26 +300,43 @@ def create_timeline_item(
         except ServiceItem.DoesNotExist:
             return 404, {"message": "Service item not found"}
 
-    # Validate file if provided
-    if file:
-        # Check file size (max 50MB)
-        if file.size > 50 * 1024 * 1024:
-            return 400, {"message": "File too large. Maximum size is 50MB"}
+    # Validate attachments if provided
+    if attachments:
+        # Validate file count (max 10 attachments)
+        if len(attachments) > 10:
+            return 400, {"message": "Maximum 10 attachments allowed per message"}
 
-        # Validate file type based on item_type
-        mime_type, _ = mimetypes.guess_type(file.name)
-        if data.item_type == "image" and not (
-            mime_type and mime_type.startswith("image/")
-        ):
-            return 400, {"message": "Invalid file type for image message"}
-        elif data.item_type == "video" and not (
-            mime_type and mime_type.startswith("video/")
-        ):
-            return 400, {"message": "Invalid file type for video message"}
-        elif data.item_type == "audio" and not (
-            mime_type and mime_type.startswith("audio/")
-        ):
-            return 400, {"message": "Invalid file type for audio message"}
+        # Validate each attachment
+        for attachment in attachments:
+            # Check file size (max 50MB per file)
+            if attachment.size > 50 * 1024 * 1024:
+                return 400, {
+                    "message": (
+                        f"File {attachment.name} is too large. " "Maximum size is 50MB"
+                    )
+                }
+
+            # Validate file type based on item_type if specific type is set
+            mime_type, _ = mimetypes.guess_type(attachment.name)
+
+            if data.item_type == "image" and not (
+                mime_type and mime_type.startswith("image/")
+            ):
+                return 400, {
+                    "message": f"Invalid file type for image message: {attachment.name}"
+                }
+            elif data.item_type == "video" and not (
+                mime_type and mime_type.startswith("video/")
+            ):
+                return 400, {
+                    "message": f"Invalid file type for video message: {attachment.name}"
+                }
+            elif data.item_type == "audio" and not (
+                mime_type and mime_type.startswith("audio/")
+            ):
+                return 400, {
+                    "message": f"Invalid file type for audio message: {attachment.name}"
+                }
 
     # Create timeline item
     timeline_item = TimelineItem.objects.create(
@@ -345,10 +346,51 @@ def create_timeline_item(
         service_item=service_item,
         item_type=data.item_type,
         content=data.content,
-        file=file,
         call_duration=data.call_duration,
         call_status=data.call_status,
     )
+
+    # Create attachments if provided
+    attachments_data = []
+    if attachments:
+        for index, attachment in enumerate(attachments):
+            # Determine attachment type based on MIME type
+            mime_type, _ = mimetypes.guess_type(attachment.name)
+
+            if mime_type:
+                if mime_type.startswith("image/"):
+                    attachment_type = "image"
+                elif mime_type.startswith("video/"):
+                    attachment_type = "video"
+                elif mime_type.startswith("audio/"):
+                    attachment_type = "audio"
+                else:
+                    attachment_type = "document"
+            else:
+                attachment_type = "document"  # Default fallback
+
+            # Create timeline item attachment
+            timeline_attachment = TimelineItemAttachment.objects.create(
+                timeline_item=timeline_item,
+                attachment_type=attachment_type,
+                file=attachment,
+                display_order=index,
+            )
+
+            attachments_data.append(
+                {
+                    "id": str(timeline_attachment.id),
+                    "attachment_type": timeline_attachment.attachment_type,
+                    "file_name": timeline_attachment.file_name,
+                    "file_size": timeline_attachment.file_size,
+                    "display_order": timeline_attachment.display_order,
+                    "file_url": (
+                        timeline_attachment.file.url
+                        if timeline_attachment.file
+                        else None
+                    ),
+                }
+            )
 
     # Build response
     sender_data = {
@@ -381,9 +423,7 @@ def create_timeline_item(
         "service_item": service_data,
         "item_type": timeline_item.item_type,
         "content": timeline_item.content,
-        "file_url": timeline_item.file.url if timeline_item.file else None,
-        "file_name": timeline_item.file_name,
-        "file_size": timeline_item.file_size,
+        "attachments": attachments_data,
         "call_duration": timeline_item.call_duration,
         "call_status": timeline_item.call_status,
         "is_delivered": timeline_item.is_delivered,

@@ -20,6 +20,7 @@ class ServiceItem(models.Model):
         ("audio_call", "Audio Call"),
         ("video_call", "Video Call"),
         ("custom", "Custom Service"),
+        ("community_post", "Community Post"),
         # Group services
         ("group_chat", "Group Chat"),
         ("group_audio_call", "Group Audio Call"),
@@ -71,7 +72,7 @@ class ServiceItem(models.Model):
         "when using this service. Ex: Resume review, photo review, etc.",
     )
 
-    # DM Related Settings
+    # DM and Custom Service Related Settings
     max_messages_a_day = models.PositiveIntegerField(
         null=True,
         blank=True,
@@ -114,6 +115,7 @@ class ServiceItem(models.Model):
         max_digits=12, decimal_places=2, default=Decimal("0.00")
     )
 
+    # Todo: Delete this field as we now have community posts as a service type
     # Broadcast status
     is_broadcasted = models.BooleanField(
         default=False,

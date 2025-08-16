@@ -105,15 +105,21 @@ class TimelineItem(models.Model, ImpressionTrackingMixin):
 
     # For messages
     content = models.TextField(blank=True, null=True)
-    file = models.FileField(upload_to="chat_files/", blank=True, null=True)
-    file_name = models.CharField(max_length=255, blank=True, null=True)
-    file_size = models.BigIntegerField(blank=True, null=True)
 
     # For calls
     call_duration = models.IntegerField(blank=True, null=True)  # in seconds
     call_status = models.CharField(
         max_length=15, blank=True, null=True
     )  # answered, missed, declined
+
+    # User can reply to a timeline item (message)
+    reply_to = models.ForeignKey(
+        "self",
+        on_delete=models.CASCADE,
+        related_name="replies",
+        null=True,
+        blank=True,
+    )
 
     # Message status
     is_delivered = models.BooleanField(default=False)
@@ -138,9 +144,10 @@ class TimelineItem(models.Model, ImpressionTrackingMixin):
         elif self.item_type == "text":
             return f"{self.sender.username}: {self.content[:50]}..."
         else:
+            attachment_count = self.attachments.count()
             return (
                 f"{self.sender.username}: [{self.item_type.upper()}] "
-                f"{self.file_name or 'file'}"
+                f"{attachment_count} attachment(s)"
             )
 
     def get_duration_display(self):
@@ -164,10 +171,52 @@ class TimelineItem(models.Model, ImpressionTrackingMixin):
         # Update chat's last_activity_at when a new item is created
         if not self.pk:  # Only for new items
             super().save(*args, **kwargs)
-            self.chat.last_activity_at = self.created_at
-            self.chat.save(update_fields=["last_activity_at"])
+            if self.chat:  # Only update if it's a chat message
+                self.chat.last_activity_at = self.created_at
+                self.chat.save(update_fields=["last_activity_at"])
         else:
             super().save(*args, **kwargs)
+
+
+class TimelineItemAttachment(models.Model):
+    """
+    Model for attachments (photos, videos, documents) for timeline items
+    """
+
+    ATTACHMENT_TYPES = [
+        ("image", "Image"),
+        ("video", "Video"),
+        ("audio", "Audio"),
+        ("document", "Document"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    timeline_item = models.ForeignKey(
+        TimelineItem, on_delete=models.CASCADE, related_name="attachments"
+    )
+
+    attachment_type = models.CharField(max_length=10, choices=ATTACHMENT_TYPES)
+    file = models.FileField(
+        upload_to="timeline_attachments/",
+        help_text="File attachment for the timeline item",
+    )
+    file_name = models.CharField(max_length=255)
+    file_size = models.BigIntegerField(help_text="File size in bytes")
+    display_order = models.PositiveIntegerField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["display_order", "created_at"]
+
+    def __str__(self):
+        return f"{self.attachment_type}: {self.file_name} for {self.timeline_item.id}"
+
+    def save(self, *args, **kwargs):
+        if self.file:
+            self.file_name = self.file.name
+            self.file_size = self.file.size
+        super().save(*args, **kwargs)
 
 
 class ChatParticipant(models.Model):
