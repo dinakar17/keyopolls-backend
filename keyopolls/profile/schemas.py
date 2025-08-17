@@ -64,6 +64,9 @@ class ProfileDetailsSchema(Schema):
     is_email_verified: bool
     created_at: datetime
 
+    total_credits: Optional[int] = None
+    total_earned: Optional[int] = None
+
     is_owner: Optional[bool] = None
 
     @staticmethod
@@ -83,6 +86,8 @@ class ProfileDetailsSchema(Schema):
             "aura_polls": profile.aura_polls,
             "aura_comments": profile.aura_comments,
             "total_aura": profile.total_aura,
+            "total_credits": profile.total_credits,
+            "total_earned": profile.total_earned,
             "is_email_verified": profile.is_email_verified,
             "created_at": profile.created_at,
             "avatar": profile.avatar.url if profile.avatar else None,

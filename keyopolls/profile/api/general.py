@@ -70,6 +70,13 @@ def edit_profile_info(
     if banner:
         profile.banner = banner
 
+    profile.headline = data.headline
+    profile.twitter = data.twitter
+    profile.linkedin = data.linkedin
+    profile.substack = data.substack
+    profile.instagram = data.instagram
+    profile.youtube = data.youtube
+
     profile.save()
 
     return ProfileDetailsSchema.resolve(profile, request.auth.id)

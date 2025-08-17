@@ -18,6 +18,11 @@ from keyopolls.chats.schemas import (
     TimelineResponseSchema,
     UpdateTimelineItemSchema,
 )
+from keyopolls.chats.utils import (
+    ChatServiceError,
+    update_transaction_with_timeline_item,
+    validate_and_process_chat_message,
+)
 from keyopolls.common.schemas import Message
 from keyopolls.communities.models import Community, CommunityMembership
 from keyopolls.profile.middleware import OptionalPseudonymousJWTAuth
@@ -228,7 +233,6 @@ def create_timeline_item(
     - call_duration: For call messages
     - call_status: For call messages
     """
-
     profile = request.auth if isinstance(request.auth, PseudonymousProfile) else None
     if not profile:
         return 403, {"message": "Authentication required"}
@@ -242,6 +246,7 @@ def create_timeline_item(
 
     chat = None
     community = None
+    transaction_info = None
 
     if data.chat_id:
         # Chat message
@@ -252,6 +257,44 @@ def create_timeline_item(
             # Ensure user is participant in this chat
             if profile not in [chat.participant_1, chat.participant_2]:
                 return 403, {"message": "You are not a participant in this chat"}
+
+            # Validate service item if provided
+            service_item = None
+            if data.service_item_id:
+                try:
+                    service_item = ServiceItem.objects.get(id=data.service_item_id)
+
+                    # Ensure service belongs to the same community as the chat
+                    if service_item.community != chat.community:
+                        return 400, {
+                            "message": (
+                                "Service item does not belong to this chat's community"
+                            )
+                        }
+
+                except ServiceItem.DoesNotExist:
+                    return 404, {"message": "Service item not found"}
+
+            # Validate chat rules and process transactions
+            try:
+                timeline_item_data = {
+                    "item_type": data.item_type,
+                    "content": data.content,
+                    "call_duration": data.call_duration,
+                    "call_status": data.call_status,
+                }
+
+                validation_result = validate_and_process_chat_message(
+                    chat=chat,
+                    sender=profile,
+                    service_item=service_item,
+                    timeline_item_data=timeline_item_data,
+                )
+
+                transaction_info = validation_result.get("transaction_info")
+
+            except ChatServiceError as e:
+                return 400, {"message": str(e)}
 
         except Chat.DoesNotExist:
             return 404, {"message": "Chat not found"}
@@ -292,9 +335,9 @@ def create_timeline_item(
             "message": "Either chat_id, community_id, or community_slug is required"
         }
 
-    # Validate service item if provided
+    # For non-chat messages, validate service item if provided
     service_item = None
-    if data.service_item_id:
+    if data.service_item_id and not chat:
         try:
             service_item = ServiceItem.objects.get(id=data.service_item_id)
         except ServiceItem.DoesNotExist:
@@ -350,8 +393,11 @@ def create_timeline_item(
         call_status=data.call_status,
     )
 
+    # Update transaction with timeline item reference
+    if transaction_info:
+        update_transaction_with_timeline_item(transaction_info, timeline_item)
+
     # Create attachments if provided
-    attachments_data = []
     if attachments:
         for index, attachment in enumerate(attachments):
             # Determine attachment type based on MIME type
@@ -370,70 +416,15 @@ def create_timeline_item(
                 attachment_type = "document"  # Default fallback
 
             # Create timeline item attachment
-            timeline_attachment = TimelineItemAttachment.objects.create(
+            TimelineItemAttachment.objects.create(
                 timeline_item=timeline_item,
                 attachment_type=attachment_type,
                 file=attachment,
                 display_order=index,
             )
 
-            attachments_data.append(
-                {
-                    "id": str(timeline_attachment.id),
-                    "attachment_type": timeline_attachment.attachment_type,
-                    "file_name": timeline_attachment.file_name,
-                    "file_size": timeline_attachment.file_size,
-                    "display_order": timeline_attachment.display_order,
-                    "file_url": (
-                        timeline_attachment.file.url
-                        if timeline_attachment.file
-                        else None
-                    ),
-                }
-            )
-
-    # Build response
-    sender_data = {
-        "id": timeline_item.sender.id,
-        "username": timeline_item.sender.username,
-        "display_name": timeline_item.sender.display_name,
-        "avatar": (
-            timeline_item.sender.avatar.url if timeline_item.sender.avatar else None
-        ),
-        "is_online": timeline_item.sender.is_online,
-        "last_seen": timeline_item.sender.last_seen,
-    }
-
-    service_data = None
-    if timeline_item.service_item:
-        service_data = {
-            "id": str(timeline_item.service_item.id),
-            "name": timeline_item.service_item.name,
-            "service_type": timeline_item.service_item.service_type,
-            "price": float(timeline_item.service_item.price),
-            "duration_minutes": timeline_item.service_item.duration_minutes,
-            "is_duration_based": timeline_item.service_item.is_duration_based,
-        }
-
-    timeline_data = {
-        "id": str(timeline_item.id),
-        "chat_id": str(timeline_item.chat.id) if timeline_item.chat else None,
-        "community_id": timeline_item.community.id if timeline_item.community else None,
-        "sender": sender_data,
-        "service_item": service_data,
-        "item_type": timeline_item.item_type,
-        "content": timeline_item.content,
-        "attachments": attachments_data,
-        "call_duration": timeline_item.call_duration,
-        "call_status": timeline_item.call_status,
-        "is_delivered": timeline_item.is_delivered,
-        "is_read": timeline_item.is_read,
-        "delivered_at": timeline_item.delivered_at,
-        "read_at": timeline_item.read_at,
-        "created_at": timeline_item.created_at,
-        "is_broadcast": timeline_item.chat is None,
-    }
-
+    # Use TimelineItemSchema to build response
+    timeline_data = TimelineItemSchema.resolve(timeline_item, profile)
     return 201, {"timeline_item": timeline_data}
 
 
