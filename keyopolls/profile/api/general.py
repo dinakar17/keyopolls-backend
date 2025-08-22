@@ -16,6 +16,7 @@ from keyopolls.profile.schemas import (
     UsersListFiltersSchema,
     UsersListResponseSchema,
 )
+from keyopolls.utils import award_new_user_bonus_credits
 
 router = Router(tags=["Profile General"])
 
@@ -76,6 +77,11 @@ def edit_profile_info(
     profile.substack = data.substack
     profile.instagram = data.instagram
     profile.youtube = data.youtube
+
+    # award new user bonus credits if applicable
+    if not profile.total_credits:
+        # This function will handle the logic of awarding credits
+        award_new_user_bonus_credits(profile)
 
     profile.save()
 

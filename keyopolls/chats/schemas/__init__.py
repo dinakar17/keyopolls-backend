@@ -34,6 +34,7 @@ class ChatUserItemSchema(Schema):
     user_id: int
     username: str
     display_name: str
+    headline: Optional[str] = None
     avatar: Optional[str] = None
     is_online: bool
     last_seen: Optional[datetime] = None

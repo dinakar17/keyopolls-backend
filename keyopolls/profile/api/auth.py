@@ -30,6 +30,7 @@ from keyopolls.profile.schemas import (
     VerifyOTPSchema,
 )
 from keyopolls.profile.services import CommunicationService
+from keyopolls.utils import award_new_user_bonus_credits
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -199,6 +200,9 @@ def complete_google_registration(request, payload: CompleteGoogleRegistrationSch
         if payload.display_name:
             profile.display_name = payload.display_name.strip()
 
+        # award the new user credits
+        award_new_user_bonus_credits(profile)
+
         profile.save()
         profile.update_last_login()
 
@@ -239,6 +243,10 @@ def complete_registration(request, payload: CompleteRegistrationSchema):
         profile.username = username
         # Remove display_name assignment since it's no longer submitted
         profile.set_password(payload.password)
+
+        # award the new user credits
+        award_new_user_bonus_credits(profile)
+
         profile.save()
         profile.update_last_login()
 

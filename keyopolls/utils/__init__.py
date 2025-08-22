@@ -15,7 +15,7 @@ from keyopolls.utils.mediaUtils import (
     get_media_info,
     validate_media_file,
 )
-from keyopolls.utils.profileutils import get_author_info
+from keyopolls.utils.profileutils import award_new_user_bonus_credits, get_author_info
 
 __all__ = [
     "get_author_info",
@@ -32,4 +32,5 @@ __all__ = [
     "increment_aura",
     "decrement_aura",
     "generate_youtube_like_id",
+    "award_new_user_bonus_credits",
 ]

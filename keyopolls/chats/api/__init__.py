@@ -211,6 +211,7 @@ def get_chat_users(request, filters: ChatUsersFiltersSchema = Query(...)):
             "user_id": target_user.id,
             "username": target_user.username,
             "display_name": target_user.display_name,
+            "headline": target_user.headline,
             "avatar": target_user.avatar.url if target_user.avatar else None,
             "is_online": getattr(
                 target_user, "is_online", False
